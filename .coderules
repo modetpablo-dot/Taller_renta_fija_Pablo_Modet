@@ -54,7 +54,7 @@ Taller_renta_fija_Pablo_Modet/
 - **No utilices `/usr/bin/python3` del sistema** (no dispone de `numpy` ni `pandas`).
 - **Intérprete recomendado para ejecución y validación por terminal**:
   ```bash
-  /home/sergio/Documents/Master_MIAX_BME/Talleres_Master_MIAX_BME/Taller-T1-B1/.venv/bin/python
+  .venv/bin/python
   ```
 - **Sin dependencia obligatoria de `scipy`**:
   - El entorno `.venv` anterior contiene `numpy`, `pandas` y `matplotlib`, pero **no tiene `scipy` instalado**.
