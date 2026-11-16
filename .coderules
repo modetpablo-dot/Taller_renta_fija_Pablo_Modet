@@ -1,0 +1,155 @@
+# .coderules — Taller de Renta Fija (MIAX15 · Instituto BME)
+
+Guía de contexto, arquitectura, contratos de funciones y flujo de trabajo Git para agentes de IA (**Claude Code / Gemini / Antigravity**) que colaboren en este repositorio.
+**Idioma obligatorio**: Responde, comenta el código y redacta la documentación siempre en **español**.
+
+---
+
+## 1. Flujo de Trabajo Git y Estrategia de Ramas (Obligatorio)
+
+1. **Prohibido subir código directamente a `main`**:
+   - La rama `main` está protegida (`MainRuleset.json`) y representa únicamente versiones estables listas para entrega. **Nunca hagas `commit` ni `push` directo a `main`.**
+2. **Desarrollo en ramas dedicadas (`feature/*`)**:
+   - Todo el código nuevo, corrección o entregable de cada rol debe desarrollarse y subirse en una **rama dedicada diferente a `main`** (por ejemplo: `feature/P1_sergio`, `feature/P2_...`, `feature/P3_...` o `feature/<seccion>`).
+3. **Promoción escalonada (`feature/*` $\rightarrow$ `Develop` $\rightarrow$ `main`)**:
+   - Una vez validado el trabajo en la rama dedicada (pasando los *Golden Fixtures* y verificaciones de CSV), se realiza el **merge / Pull Request hacia la rama `Develop`**.
+   - La rama **`Develop`** actúa como rama de integración continua del equipo y **será la única que se vaya promocionando hacia `main`** mediante Pull Request revisado.
+4. **Estilo de commits**:
+   - Usa mensajes claros tipo Conventional Commits (`feat(S2): ...`, `fix(S3): ...`, `docs: ...`).
+
+---
+
+## 2. Contexto del Proyecto y Estructura
+
+Análisis integral de un universo de **2.165 bonos corporativos en EUR** a fecha de valoración estática **`01/10/2026`** (`fecha_analisis = pd.to_datetime('2026-10-01')`), con entrega y defensa el **jueves 26/11/2026**.
+
+```text
+Taller_renta_fija_Pablo_Modet/
+├── .coderules                          # Reglas maestras para agentes (enlazado a .GEMINI, .CLAUDE, GEMINI.md, CLAUDE.md)
+├── README.md                           # Estado del proyecto, cronograma y resumen de entregables
+├── MainRuleset.json                    # Reglas de protección de rama en GitHub
+├── docs/
+│   ├── Renta Fija_clase_1.pdf          # Enunciado oficial y supuestos del taller
+│   └── planning_brief.pptx             # Planificación diaria (Mon 16 – Thu 26 Nov), reparto P1/P2/P3 y decisiones
+├── data/
+│   ├── universo.csv                    # 2.165 bonos × 21 cols (sep=';', UTF-8-BOM, fechas dd/mm/yyyy, NA='#N/A N/A')
+│   ├── precios_historicos_universo.csv # Precios limpios históricos (filas '<ISIN> Corp', 1.097 días naturales, NA='#N/D')
+│   ├── curvaESTR.csv                   # Curva €STR (33 pilares hasta 2076; Date, Zero Rate, Discount)
+│   └── precios_historicos_varios.csv   # iTraxx Main/Xover, futuros DU1/OE1/RX1 e índice benchmark RECMTREU
+├── src/
+│   ├── funciones_aux.py                # Motor modular reutilizable (importado como `import funciones_aux as fa`)
+│   └── analisis_cartera.ipynb          # Cuaderno principal con las 9 secciones del taller
+└── results/                            # Carpeta de salida para los 9 ficheros CSV requeridos
+```
+
+### Reglas de edición del Notebook (`src/analisis_cartera.ipynb`)
+- **Toda la lógica reutilizable debe implementarse en `src/funciones_aux.py`**; las celdas del notebook solo invocan funciones de `fa`, muestran tablas/gráficos y responden a las preguntas en Markdown.
+- **Rutas relativas desde `src/`**: `RUTA_DATOS = '../data/'` y `RUTA_RESULTS = '../results/'`.
+- **Precaución con el IDE**: Antes de modificar `src/analisis_cartera.ipynb`, comprueba siempre su estado actual en disco por si el editor del usuario lo ha guardado recientemente.
+
+---
+
+## 3. Entorno Python y Restricciones Técnicas
+
+- **No utilices `/usr/bin/python3` del sistema** (no dispone de `numpy` ni `pandas`).
+- **Intérprete recomendado para ejecución y validación por terminal**:
+  ```bash
+  /home/sergio/Documents/Master_MIAX_BME/Talleres_Master_MIAX_BME/Taller-T1-B1/.venv/bin/python
+  ```
+- **Sin dependencia obligatoria de `scipy`**:
+  - El entorno `.venv` anterior contiene `numpy`, `pandas` y `matplotlib`, pero **no tiene `scipy` instalado**.
+  - Por tanto, en `src/funciones_aux.py` los métodos numéricos (búsqueda de raíces para *z-spread* y TIR, correlaciones de Spearman mediante `.rank().corr()`, etc.) deben mantenerse en **Python / NumPy / Pandas puro** (como `_resolver_raiz` por bisección), salvo que se verifique explícitamente la presencia de `scipy` en el entorno activo.
+- **Matplotlib en modo consola**: exportar `MPLCONFIGDIR=/tmp` y usar `matplotlib.use('Agg')` en scripts de prueba para evitar bloqueos de permisos.
+
+---
+
+## 4. Convenciones Financieras y Decisiones de Diseño Acordadas
+
+1. **Unidades y convenios**:
+   - **Tipos de interés, *yields* y *spreads***: en **tanto por uno (decimales)** tanto en las funciones como en los CSV exportados ($100\text{ pb} = 0.01$). Para visualización en tablas/gráficos del notebook se muestran en puntos básicos ($\times 10\,000$) o porcentaje ($\times 100$).
+   - **Precios y flujos**: expresados por cada **`100`** de valor nominal.
+   - **Base de cálculo temporal**: **`ACT/365`** (`(fecha_fin - fecha_inicio).days / 365.0`), sin ajuste de días hábiles.
+2. **Interpolación de la curva (`interpolar_factor_descuento`)**:
+   - Interpolación **exponencial (log-lineal)** sobre factores de descuento entre pilares adyacentes:
+     $$\text{FD}(t) = \text{FD}_1^{\frac{t_2 - t}{t_2 - t_1}} \cdot \text{FD}_2^{\frac{t - t_1}{t_2 - t_1}}$$
+   - Extrapolación plana de tipos cero continuos antes del primer pilar (2 bonos vencen antes del primer pilar de la curva) y después del último.
+3. **Fecha de vencimiento efectiva (`fecha_vencimiento_efectiva`) — Regla corregida para *calls* pasadas**:
+   - **Bonos no *callable* (`Callable == 'N'`, 583 bonos)**: se valoran hasta `Maturity`.
+   - **Bonos *callable* con fecha futura (`Next Call Date > 01/10/2026`, 1.572 bonos)**: se valoran hasta `Next Call Date` (incluye 17 bonos perpetuos).
+   - **Bonos *callable* cuya fecha de *call* ya ha pasado (`Next Call Date <= 01/10/2026`, 11 bonos)**:
+     - Para los **10 bonos con vencimiento fijo**, dado que la opción no se ejerció y el bono sigue cotizando, **se toma `Maturity` como vencimiento efectivo** (evitando *z-spreads* absurdos de miles de puntos básicos al forzar una amortización inmediata a la par).
+     - Para el **único bono perpetuo con *call* pasada (`FR0014005EJ6`)**, al carecer de `Maturity`, se utiliza `proximo_cupon(bono, fecha_valor)`.
+4. **Cupones y *calls* fuera de ciclo (`flujos_bono`)**:
+   - Cupones fijos hasta el vencimiento efectivo incluso para bonos `VARIABLE` (330 bonos), pagando `Coupon / Coupon Frequency` por periodo.
+   - Si la fecha de *call* no coincide con una fecha del calendario ordinario de cupones (**1.328 bonos**, de los cuales 1.201 son *par-calls* $\le 95$ días antes de `Maturity`), en la fecha de *call* se paga **`100 + cupón corrido devengado (stub ACT/365)`**, nunca un cupón completo.
+5. **Etiquetado de *Z-Spreads* poco fiables (`universo['ZSpread_PocoFiable']`) en Sección 3**:
+   - Incluso corrigiendo las 11 *calls* pasadas, valorar siempre a la fecha de *call* distorsiona el *z-spread* en determinados bonos. En la Sección 3 se crea la columna booleana `universo['ZSpread_PocoFiable']` que marca **248 bonos (11,5% del universo)** bajo tres criterios objetivos:
+     1. **Plazo efectivo ultra-corto (`Plazo_efectivo < 0.25` años — 80 bonos)**: el ruido de *bid-ask* o redondeo en precio se divide por una duración cercana a cero.
+     2. ***Par-calls* próximas a vencimiento (`0 < (Maturity - Vto_efectivo).days <= 95` y `Plazo_efectivo < 1.0` — 218 bonos)**: muchos cotizan sobre la par y el mercado los valora a `Maturity`, provocando *spreads* negativos artificiales si se truncan en la *call*.
+     3. **Valores extremos residuales (`Spread_pb < 0` o `Spread_pb > 500` — 24 bonos)**: incluyen opcionalidades *make-whole* o emisiones *deep-discount*.
+   - Al filtrar `~universo['ZSpread_PocoFiable']` (1.917 bonos), el *z-spread* medio es `90,5 pb`, mediana `87,9 pb` y rango `[4,2, 320,5] pb`.
+
+---
+
+## 5. Catálogo de Funciones en `src/funciones_aux.py` y Reparto por Roles
+
+### Rol P1 — Pricing Core + Integrator (Secciones 2, 3 y 4)
+| Función | Estado | Descripción y Firma |
+| :--- | :---: | :--- |
+| `cargar_curva(ruta_csv)` | ✅ Hecho (Mon 16) | Carga `curvaESTR.csv`, convierte `Date` a `datetime` y ordena por fecha. |
+| `factor_descuento(curva, fecha_valor, fecha_flujo)` | ✅ Hecho (Mon 16) | Interpolación exponencial (log-lineal) de factores de descuento en base `ACT/365`. |
+| `interpolar_factor_descuento(...)` | ✅ Hecho (Mon 16) | Alias de `factor_descuento`. |
+| `es_perpetuo(bono)` | ✅ Hecho (Tue 17) | Devuelve `True` si `Maturity` es `NaT`. |
+| `fecha_vencimiento_efectiva(bono, fecha_valor)` | ✅ Hecho (Tue 17) | Aplica la regla de vencimiento efectivo con la corrección de los 11 bonos con *call* vencida. |
+| `generar_fechas_cupon(bono, fecha_valor, fecha_fin)` | ✅ Hecho (Tue 17) | Reconstruye el calendario de cupones hacia atrás desde `Penultimate Coupon Date` / `Maturity`. |
+| `proximo_cupon(bono, fecha_valor)` | ✅ Hecho (Tue 17) | Calcula el siguiente cupón para perpetuos con `Next Call Date <= fecha_valor`. |
+| `cupon_corrido(bono, fecha_valor)` | ✅ Hecho (Tue 17) | Calcula cupón corrido devengado (`ACT/365`), fecha del último cupón y días transcurridos. |
+| `flujos_bono(bono, fecha_valor)` | ✅ Hecho (Tue 17) | Genera `DataFrame` con `Fecha`, `Flujo`, `Plazo` considerando *stubs* en *calls* fuera de ciclo. |
+| `valorar_bono(bono, curva, fecha_valor, spread=0.0, desplazamiento_tipos=0.0)` | ✅ Hecho (Tue 17) | Descuenta flujos con $\text{FD}(t_i) \cdot e^{-(s + \Delta r) t_i}$ y devuelve `precio_sucio`, `cupon_corrido`, `precio_limpio`, `vencimiento_efectivo`, `flujos`. |
+| `valorar_universo(universo, curva, fecha_valor)` | ✅ Hecho (Wed 18) | Valora los 2.165 bonos del universo y devuelve `DataFrame` indexado por `ISIN`. |
+| `_resolver_raiz(f, a, b, tol=1e-12, max_iter=200)` | ✅ Hecho (Wed 18) | Solver numérico por bisección pura con expansión automática de intervalo. |
+| `z_spread(bono, curva, fecha_valor, precio_limpio_mercado)` | ✅ Hecho (Wed 18) | Resuelve el *z-spread* continuo $z$ en tanto por uno pre-calculando flujos y $\text{FD}_i$ fuera del bucle (~2s para los 2.165 bonos). |
+| `ytm(bono, fecha_valor, precio_limpio_mercado)` | 🔄 Stub (Thu 19) | *Stub actual*: `Coupon / Price` en decimal. *Planificado Thu 19*: TIR anual $\sum \text{CF}_i / (1+y)^{t_i} = P_{\text{sucio}}$. |
+| `risk_measures(bono, fecha_valor, y)` | 🔄 Stub (Thu 19) | *Stub actual*: aproximación *bullet*. *Planificado Thu 19*: Duración Macaulay (`Dur`), `ModDur = Dur/(1+y)`, `Convexidad` y `VarPrecioDurConv` para $\Delta y = -0.01$. |
+
+### Rol P2 — Data, Backtest, Stress (Secciones 1, 5 y 9)
+- **Sección 1 (Datos y QC)**: `load_universe`, `clean_universe`, `load_prices`, `clean_prices`, `qc_universe`, `qc_prices`. Detección de *outliers* (ej. `DE000A180B80` a `240.27` el `2024-12-24`, 33 picos reversibles $>10\%$, 313 columnas de fin de semana en `NaN`) y *forward-fill* $\le 5$ días hábiles.
+- **Sección 5 (Backtest Equal Weight)**: `month_end_dates`, `backtest_equal_weight` (rebalanceo en último día hábil de cada mes, rentabilidad *Total Return* incluyendo variación de precio limpio + variación de cupón corrido + cupones cobrados frente a `RECMTREU`).
+- **Sección 9 (Stress Test)**: `stress_test(weights, universe, curve, fecha, V=1e8, scenarios)` por revaluación completa sobre cartera de $100\text{M€}$ en escenarios Base, A (+100 pb tipos), B (ampliación de *spreads* de crédito) y C (combinado A+B).
+
+### Rol P3 — Portfolio, Hedging, Deck (Secciones 6, 7 y 8)
+- **Sección 6 (Mandato de Inversión)**: `eligible_mask`, `optimise_mandate`, `portfolio_stats`. Maximizar *yield* de la cartera sujeto a: bonos vivos, nominal $> 500\text{M€}$ (excluye los 641 bonos con exactamente $500\text{M€}$), sin deuda subordinada (excluyendo también `Sr Non Preferred`), máx. 20 bonos, peso por emisión $\le 10\%$, peso por emisor $\le 15\%$, peso High Yield $\le 10\%$ (tratando `NR` y `NaN` como HY por prudencia), y duración de cartera $\le 3$ años.
+- **Sección 7 (Cobertura de Tipos)**: `n_futures` usando futuro sobre *Schatz* (`DU1`, precio `104.925`, nominal `100.000 €`).
+- **Sección 8 (Cobertura de Crédito)**: `cds_notional` usando CDS **iTraxx Main** ($4.500\text{ €/pb}$ por cada $10\text{M€}$ de nocional $\Rightarrow$ duración de *spread* $\approx 4.5$).
+
+---
+
+## 6. Golden Fixtures (Validación Obligatoria en Sección 2 y 3)
+
+Cualquier cambio en el motor de valoración (`funciones_aux.py`) debe mantener la consistencia con los 6 *Golden Fixtures* verificados en `analisis_cartera.ipynb`:
+
+| ISIN | Caso de prueba | Vto. Efectivo | Precio Sucio (€STR) | Cupón Corrido | Precio Limpio (€STR) | Precio Mercado | Z-Spread (pb) |
+| :--- | :--- | :---: | :---: | :---: | :---: | :---: | :---: |
+| `XS0161488498` | Fijo anual estándar (no callable) | `2033-01-31` | `129.6691` | `3.9973` | `125.6718` | `118.4250` | `97.90` |
+| `XS1821883102` | Cupón semestral (`freq = 2`) | `2027-07-23` | `99.6443` | `0.2644` | `99.3799` | `98.8195` | `70.11` |
+| `FR0014001I50` | Cupón cero (`Coupon = 0`) | `2026-10-09` | `99.9562` | `0.0000` | `99.9562` | `99.9360` | `92.19` |
+| `XS1206541366` | Perpetuo (`Maturity = NaT` $\rightarrow$ *call*) | `2027-03-30` | `102.3095` | `1.3942` | `100.9153` | `100.3205` | `120.77` |
+| `XS1186176571` | *Call* pasada (`<= 01/10/2026` $\rightarrow$ `Maturity`) | `2027-05-11` | `99.7867` | `0.6258` | `99.1609` | `98.6780` | `80.60` |
+| `XS1405762805` | *Par-call* fuera de ciclo (*stub* `ACT/365`) | `2028-02-23` | `98.6857` | `0.5068` | `98.1788` | `97.1055` | `79.68` |
+
+---
+
+## 7. Especificación de Ficheros de Salida (`results/*.csv`)
+
+Todos los ficheros deben guardarse en `results/` con separador `;`, codificación UTF-8, sin `NaN` en las columnas numéricas requeridas y respetando los nombres de columna exactos:
+
+| Sección | Fichero en `results/` | Estado | Columnas requeridas / Formato |
+| :---: | :--- | :---: | :--- |
+| **S1** | `control_calidad_universo.csv` | ⏳ P2 | Estadísticos por variable: observaciones, *missing*, únicos, mínimo y máximo. |
+| **S1** | `control_calidad_precios.csv` | ⏳ P2 | Por bono (`ISIN`): observaciones, *missing*, mínimo, máximo, fecha inicio y fecha fin. |
+| **S2** | `valoracion.csv` | ✅ P1 | `ISIN;PrecioSucio;CuponCorrido;PrecioLimpio` (2.165 filas). |
+| **S3** | `spread.csv` | ✅ P1 | `ISIN;Spread` (2.165 filas, `Spread` en tanto por uno). |
+| **S4** | `sensibilidad.csv` | ⏳ P1 (Thu 19) | `ISIN;Yield;Dur;ModDur;Convexidad;VarPrecioDurConv` (2.165 filas). |
+| **S5** | `backtest_equal_weight.csv` | ⏳ P2 | `Fecha Mes;Rent cartera;Rent benchmark;Dif` |
+| **S6** | `cartera_optima.csv` | ⏳ P3 | `ISIN;Peso;Yield;Duration;Rating;Issuer;Outstanding Amount;Seniority;Industry Sector` + fila `CARTERA`. |
+| **S9** | `stress_test.csv` | ⏳ P2 | `Escenario;ValorCartera;P&L` |

@@ -11,22 +11,22 @@ Repositorio de trabajo para el Taller de Renta Fija del Máster mIAx (edición M
 
 ```text
 Taller_renta_fija_Pablo_Modet/
+├── .coderules                              # Reglas para agentes IA (enlazado a .GEMINI, .CLAUDE, GEMINI.md, CLAUDE.md)
 ├── README.md
 ├── docs/
 │   ├── Renta Fija_clase_1.pdf              # Enunciado y marco teórico del taller
-│   ├── planning_brief.pptx                 # Planificación detallada, roles y decisiones técnicas
-│   └── Taller_RF_MIAX15/
-│       ├── data/
-│       │   ├── universo.csv                        # Características estáticas de los 2.165 bonos
-│       │   ├── precios_historicos_universo.csv     # Serie histórica de precios limpios (2.165 × 1.097 días)
-│       │   ├── curvaESTR.csv                       # Curva libre de riesgo €STR (33 pilares hasta 2076)
-│       │   └── precios_historicos_varios.csv       # iTraxx Main/Xover, futuros DU1/OE1/RX1 y benchmark RECMTREU
-│       ├── src/
-│       │   ├── funciones_aux.py                    # Motor de valoración, curvas, spreads y funciones auxiliares
-│       │   └── analisis_cartera.ipynb              # Cuaderno principal con las 9 secciones del análisis
-│       └── results/                                # Ficheros CSV de salida exigidos por el enunciado
-│           ├── valoracion.csv                      # [Completado] Sección 2
-│           └── spread.csv                          # [Completado] Sección 3
+│   └── planning_brief.pptx                 # Planificación detallada, roles y decisiones técnicas
+├── data/
+│   ├── universo.csv                        # Características estáticas de los 2.165 bonos
+│   ├── precios_historicos_universo.csv     # Serie histórica de precios limpios (2.165 × 1.097 días)
+│   ├── curvaESTR.csv                       # Curva libre de riesgo €STR (33 pilares hasta 2076)
+│   └── precios_historicos_varios.csv       # iTraxx Main/Xover, futuros DU1/OE1/RX1 y benchmark RECMTREU
+├── src/
+│   ├── funciones_aux.py                    # Motor de valoración, curvas, spreads y funciones auxiliares
+│   └── analisis_cartera.ipynb              # Cuaderno principal con las 9 secciones del análisis
+└── results/                                # Ficheros CSV de salida exigidos por el enunciado
+    ├── valoracion.csv                      # [Completado] Sección 2
+    └── spread.csv                          # [Completado] Sección 3
 ```
 
 ---
@@ -67,12 +67,12 @@ Estado de avance respecto a la planificación original:
 ## Detalle del Trabajo Realizado Hasta Ahora
 
 ### 1. Exploración Preliminar de Datos (Sección 1 – En progreso)
-En [analisis_cartera.ipynb](docs/Taller_RF_MIAX15/src/analisis_cartera.ipynb) se ha implementado la carga y el análisis exploratorio visual del universo (`universo.csv`):
+En [analisis_cartera.ipynb](src/analisis_cartera.ipynb) se ha implementado la carga y el análisis exploratorio visual del universo (`universo.csv`):
 - Inspección de divisas (100% EUR), tipos de cupón (`FIXED` vs `VARIABLE`), prelación (`Seniority`), opcionalidad (`Callable`) e identificación de los 18 bonos perpetuos.
 - Análisis de concentración sectorial (45% sector financiero) y por emisor, distribución de *ratings* crediticios, riesgo de liquidez (horquilla *bid-ask* vs nominal vivo) y detección de valores *missing*.
 
 ### 2. Motor de Valoración y Vencimiento Efectivo (P1 – Mon 16 & Tue 17)
-Implementado en [funciones_aux.py](docs/Taller_RF_MIAX15/src/funciones_aux.py) y ejecutado en la **Sección 2** de [analisis_cartera.ipynb](docs/Taller_RF_MIAX15/src/analisis_cartera.ipynb):
+Implementado en [funciones_aux.py](src/funciones_aux.py) y ejecutado en la **Sección 2** de [analisis_cartera.ipynb](src/analisis_cartera.ipynb):
 - **Interpolación de la curva €STR (`interpolar_factor_descuento`)**: interpolación exponencial (log-lineal) de factores de descuento con base `ACT/365` y extrapolación plana en tipo continuo en los extremos.
 - **Vencimiento efectivo y tratamiento de *calls* pasadas (`fecha_vencimiento_efectiva`)**:
   - Bonos *callable* con `Next Call Date > 01/10/2026` (1.572 bonos, incluyendo 17 perpetuos): se valoran a su próxima fecha de *call*.
@@ -81,10 +81,10 @@ Implementado en [funciones_aux.py](docs/Taller_RF_MIAX15/src/funciones_aux.py) y
   - Reconstrucción hacia atrás desde el último cupón ordinario (`Penultimate Coupon Date` o `Maturity`), respetando frecuencias anuales (1), semestrales (2) y cupón cero.
   - Tratamiento exacto de *calls* fuera del calendario de cupón (1.328 bonos, de los cuales 1.201 son *par-calls* $\le 95$ días antes de vencimiento): en la fecha de *call* se abona el principal (100) más el cupón devengado (*stub* en base `ACT/365`) en lugar de un cupón completo.
 - **Validación con 6 *Golden Fixtures***: celda de control que verifica el comportamiento exacto sobre `XS0161488498` (anual estándar), `XS1821883102` (semestral), `FR0014001I50` (cupón cero), `XS1206541366` (perpetuo), `XS1186176571` (*call* pasada valorada a vencimiento con *z-spread* de `80,6 pb`) y `XS1405762805` (*par-call* con *stub*).
-- **Entregable generado**: [results/valoracion.csv](docs/Taller_RF_MIAX15/results/valoracion.csv) (`ISIN;PrecioSucio;CuponCorrido;PrecioLimpio`, 2.165 bonos, 0 `NaN`).
+- **Entregable generado**: [results/valoracion.csv](results/valoracion.csv) (`ISIN;PrecioSucio;CuponCorrido;PrecioLimpio`, 2.165 bonos, 0 `NaN`).
 
 ### 3. Cálculo de *Z-Spread* y Filtrado de Fiabilidad (P1 – Wed 18)
-Implementado en [funciones_aux.py](docs/Taller_RF_MIAX15/src/funciones_aux.py) y analizado en la **Sección 3** de [analisis_cartera.ipynb](docs/Taller_RF_MIAX15/src/analisis_cartera.ipynb):
+Implementado en [funciones_aux.py](src/funciones_aux.py) y analizado en la **Sección 3** de [analisis_cartera.ipynb](src/analisis_cartera.ipynb):
 - **Solver numérico (`_resolver_raiz` y `z_spread`)**: bisección pura (`tol=1e-12`, sin dependencia de `scipy`) que resuelve el desplazamiento paralelo $z$ con capitalización continua ($\text{FD}_i(z) = \text{FD}_i \cdot e^{-z \cdot t_i}$) para igualar el precio sucio teórico al precio sucio de mercado ($\text{Precio Limpio} + \text{Cupón Corrido}$). Pre-calcula flujos y factores de descuento fuera del bucle (~2 segundos para los 2.165 bonos).
 - **Análisis de coherencia crediticia**:
   - Escalonamiento monotónico por calidad crediticia (IG vs HY/NR) y por nivel de prelación (`Sr Preferred` < `Sr Non Preferred` < `Subordinated` < `Jr Subordinated`).
@@ -95,7 +95,7 @@ Implementado en [funciones_aux.py](docs/Taller_RF_MIAX15/src/funciones_aux.py) y
     2. Bonos con *par-call* próxima a vencimiento (`<= 95` días antes de `Maturity` y plazo `< 1` año: 218 bonos) que cotizan por encima de la par y el mercado valora a `Maturity` en lugar de a la fecha de *call*.
     3. Valores extremos residuales (`Spread_pb < 0` o `Spread_pb > 500`: 24 bonos).
   - En los **1.917 bonos fiables** (`~universo['ZSpread_PocoFiable']`), el *z-spread* presenta una distribución limpia con media `90,5 pb`, mediana `87,9 pb`, desviación típica `35,9 pb` y rango `[4,2, 320,5] pb`.
-- **Entregable generado**: [results/spread.csv](docs/Taller_RF_MIAX15/results/spread.csv) (`ISIN;Spread` en tanto por uno, 2.165 bonos, 0 `NaN`).
+- **Entregable generado**: [results/spread.csv](results/spread.csv) (`ISIN;Spread` en tanto por uno, 2.165 bonos, 0 `NaN`).
 
 ### 4. *Stubs* de Desbloqueo para Sección 4 (P1 – Mon 16 / Wed 18)
-- Se han incluido en [funciones_aux.py](docs/Taller_RF_MIAX15/src/funciones_aux.py) las firmas definitivas de `ytm(bono, fecha_valor, precio_limpio_mercado)` y `risk_measures(bono, fecha_valor, y)` con aproximaciones iniciales (*stubs* Day-1) para permitir el desarrollo en paralelo de las Secciones 6–9 antes de su implementación completa planificada para el **jueves 19 de noviembre**.
+- Se han incluido en [funciones_aux.py](src/funciones_aux.py) las firmas definitivas de `ytm(bono, fecha_valor, precio_limpio_mercado)` y `risk_measures(bono, fecha_valor, y)` con aproximaciones iniciales (*stubs* Day-1) para permitir el desarrollo en paralelo de las Secciones 6–9 antes de su implementación completa planificada para el **jueves 19 de noviembre**.
