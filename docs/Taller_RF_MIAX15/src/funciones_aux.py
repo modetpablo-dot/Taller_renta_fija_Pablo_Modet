@@ -54,7 +54,11 @@ def fecha_vencimiento_efectiva(bono, fecha_valor):
     Fecha hasta la que valoramos el bono, según las hipótesis del enunciado:
     - Sin call: su vencimiento.
     - Con call futura (incluye perpetuos): la próxima fecha call (asumimos que se ejerce).
-    - Con call ya pasada (la opción ya es ejercitable): la próxima fecha de cupón.
+    - Con call ya pasada (la opción ya era ejercitable y el emisor NO la ha ejercido, porque el
+      bono sigue cotizando): su vencimiento final. Asumir amortización en el próximo cupón daba
+      z-spreads absurdos (miles de pb) en bonos que cotizan muy por debajo de la par.
+      Excepción: un perpetuo con call pasada no tiene vencimiento; se usa el próximo cupón
+      (FR0014005EJ6, único caso; conviene excluirlo del mandato).
     """
     fecha_call = bono['Next Call Date']
 
@@ -62,6 +66,8 @@ def fecha_vencimiento_efectiva(bono, fecha_valor):
         return bono['Maturity']
     if fecha_call > fecha_valor:
         return fecha_call
+    if pd.notna(bono['Maturity']):
+        return bono['Maturity']
     return proximo_cupon(bono, fecha_valor)
 
 def factor_descuento(t, curva):
@@ -156,3 +162,58 @@ def valorar_bono(bono, curva, fecha_valor, spread=0.0):
         'CuponCorrido': cc,
         'PrecioLimpio': precio_sucio - cc
     }
+
+
+# ----------------------------------------------------------------------------------
+# SECCION 3: z-spread (y stubs de la sección 4)
+# ----------------------------------------------------------------------------------
+
+def _resolver_raiz(f, a, b, tol=1e-12, max_iter=200):
+    """
+    Raíz de f en [a, b] por bisección (f(a) y f(b) deben tener signo contrario).
+    Se implementa a mano para no depender de scipy; es robusta y suficientemente rápida.
+    """
+    fa_, fb_ = f(a), f(b)
+    if fa_ * fb_ > 0:
+        raise ValueError('La raíz no está en el intervalo indicado')
+    for _ in range(max_iter):
+        m = 0.5 * (a + b)
+        fm = f(m)
+        if fa_ * fm <= 0:
+            b, fb_ = m, fm
+        else:
+            a, fa_ = m, fm
+        if (b - a) < tol:
+            break
+    return 0.5 * (a + b)
+
+
+def z_spread(bono, curva, fecha_valor, precio_limpio_mercado):
+    """
+    Z-spread (decimal, capitalización continua): desplazamiento paralelo de la curva cero que
+    hace que el precio SUCIO calculado iguale al de mercado (limpio de mercado + cupón corrido).
+    """
+    objetivo = precio_limpio_mercado + cupon_corrido(bono, fecha_valor)
+    # Flujos y factores de descuento de la curva se calculan UNA vez (el spread solo añade e^(-s·t));
+    # equivale a llamar a valorar_bono en cada iteración, pero es mucho más rápido.
+    flujos = flujos_bono(bono, fecha_valor)
+    t = flujos['Plazo'].values
+    cf_df = flujos['Flujo'].values * factor_descuento(t, curva)
+    f = lambda s: (cf_df * np.exp(-s * t)).sum() - objetivo
+    # El precio es decreciente en el spread: buscamos entre -10% y +100%
+    return _resolver_raiz(f, -0.10, 1.00)
+
+
+# ----------------------------------------------------------------------------------
+# STUBS (Thu 19, SECCION 4): firma final, lógica simplificada hasta que se implemente
+# ----------------------------------------------------------------------------------
+
+def ytm(bono, fecha_valor, precio_limpio_mercado):
+    """STUB: yield aproximada = cupón / precio limpio (decimal). Pendiente: yield anual exacta."""
+    return bono['Coupon'] / 100 / (precio_limpio_mercado / 100)
+
+
+def risk_measures(bono, fecha_valor, y):
+    """STUB: duración aproximada = años hasta el vencimiento efectivo (bullet). Pendiente: Macaulay/Mod/Convexidad."""
+    plazo = (fecha_vencimiento_efectiva(bono, fecha_valor) - fecha_valor).days / 365
+    return {'Dur': plazo, 'ModDur': plazo / (1 + y), 'Convexidad': np.nan}
