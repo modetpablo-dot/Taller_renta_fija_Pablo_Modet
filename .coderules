@@ -56,10 +56,11 @@ Taller_renta_fija_Pablo_Modet/
   ```bash
   .venv/bin/python
   ```
+  - El directorio `src/` está registrado en `.venv/lib/python3.11/site-packages/taller_rf.pth`, por lo que `import funciones_aux as fa` funciona directamente desde cualquier directorio de trabajo.
 - **Sin dependencia obligatoria de `scipy`**:
   - El entorno `.venv` anterior contiene `numpy`, `pandas` y `matplotlib`, pero **no tiene `scipy` instalado**.
   - Por tanto, en `src/funciones_aux.py` los métodos numéricos (búsqueda de raíces para *z-spread* y TIR, correlaciones de Spearman mediante `.rank().corr()`, etc.) deben mantenerse en **Python / NumPy / Pandas puro** (como `_resolver_raiz` por bisección), salvo que se verifique explícitamente la presencia de `scipy` en el entorno activo.
-- **Matplotlib en modo consola**: exportar `MPLCONFIGDIR=/tmp` y usar `matplotlib.use('Agg')` en scripts de prueba para evitar bloqueos de permisos.
+- **Matplotlib en modo consola**: exportar `MPLCONFIGDIR=/home/sergio/pip_tmp` y usar `matplotlib.use('Agg')` en scripts de prueba para evitar avisos de caché.
 
 ---
 
@@ -94,23 +95,21 @@ Taller_renta_fija_Pablo_Modet/
 ## 5. Catálogo de Funciones en `src/funciones_aux.py` y Reparto por Roles
 
 ### Rol P1 — Pricing Core + Integrator (Secciones 2, 3 y 4)
-| Función | Estado | Descripción y Firma |
+| Función en `src/funciones_aux.py` | Estado | Descripción y Firma |
 | :--- | :---: | :--- |
-| `cargar_curva(ruta_csv)` | ✅ Hecho (Mon 16) | Carga `curvaESTR.csv`, convierte `Date` a `datetime` y ordena por fecha. |
-| `factor_descuento(curva, fecha_valor, fecha_flujo)` | ✅ Hecho (Mon 16) | Interpolación exponencial (log-lineal) de factores de descuento en base `ACT/365`. |
-| `interpolar_factor_descuento(...)` | ✅ Hecho (Mon 16) | Alias de `factor_descuento`. |
-| `es_perpetuo(bono)` | ✅ Hecho (Tue 17) | Devuelve `True` si `Maturity` es `NaT`. |
-| `fecha_vencimiento_efectiva(bono, fecha_valor)` | ✅ Hecho (Tue 17) | Aplica la regla de vencimiento efectivo con la corrección de los 11 bonos con *call* vencida. |
-| `generar_fechas_cupon(bono, fecha_valor, fecha_fin)` | ✅ Hecho (Tue 17) | Reconstruye el calendario de cupones hacia atrás desde `Penultimate Coupon Date` / `Maturity`. |
-| `proximo_cupon(bono, fecha_valor)` | ✅ Hecho (Tue 17) | Calcula el siguiente cupón para perpetuos con `Next Call Date <= fecha_valor`. |
-| `cupon_corrido(bono, fecha_valor)` | ✅ Hecho (Tue 17) | Calcula cupón corrido devengado (`ACT/365`), fecha del último cupón y días transcurridos. |
-| `flujos_bono(bono, fecha_valor)` | ✅ Hecho (Tue 17) | Genera `DataFrame` con `Fecha`, `Flujo`, `Plazo` considerando *stubs* en *calls* fuera de ciclo. |
-| `valorar_bono(bono, curva, fecha_valor, spread=0.0, desplazamiento_tipos=0.0)` | ✅ Hecho (Tue 17) | Descuenta flujos con $\text{FD}(t_i) \cdot e^{-(s + \Delta r) t_i}$ y devuelve `precio_sucio`, `cupon_corrido`, `precio_limpio`, `vencimiento_efectivo`, `flujos`. |
-| `valorar_universo(universo, curva, fecha_valor)` | ✅ Hecho (Wed 18) | Valora los 2.165 bonos del universo y devuelve `DataFrame` indexado por `ISIN`. |
-| `_resolver_raiz(f, a, b, tol=1e-12, max_iter=200)` | ✅ Hecho (Wed 18) | Solver numérico por bisección pura con expansión automática de intervalo. |
+| `fechas_cupon(ancla, frecuencia, desde, hasta)` | ✅ Hecho (Tue 17) | Genera las fechas de cupón en `(desde, hasta]` sumando múltiplos de `12 // frecuencia` meses desde `ancla`. |
+| `proximo_cupon(bono, fecha_valor)` | ✅ Hecho (Tue 17) | Próxima fecha de cupón posterior a `fecha_valor` (usada para el perpetuo con *call* vencida). |
+| `fecha_vencimiento_efectiva(bono, fecha_valor)` | ✅ Hecho (Tue 17) | Aplica la regla de vencimiento efectivo con la corrección de los 11 bonos con *call* vencida (`<= 01/10/2026` $\rightarrow$ `Maturity` salvo perpetuo `FR0014005EJ6`). |
+| `factor_descuento(t, curva)` | ✅ Hecho (Mon 16) | Interpolación exponencial (log-lineal) de factores de descuento (`np.interp` sobre `log(Discount)`). |
+| `ancla_cupones(bono)` | ✅ Hecho (Tue 17) | Devuelve `Maturity` (o `First Coupon Date` si es perpetuo). |
+| `cupon_anterior(bono, fecha)` | ✅ Hecho (Tue 17) | Última fecha de cupón anterior o igual a `fecha`. |
+| `flujos_bono(bono, fecha_valor)` | ✅ Hecho (Tue 17) | Genera `DataFrame` con `Fecha`, `Plazo` (`ACT/365`) y `Flujo`, incluyendo *stubs* en *calls* fuera de ciclo (`100 + devengado`). |
+| `cupon_corrido(bono, fecha_valor)` | ✅ Hecho (Tue 17) | Calcula el cupón corrido devengado por `100` de nominal en base `ACT/365`. |
+| `valorar_bono(bono, curva, fecha_valor, spread=0.0)` | ✅ Hecho (Tue 17) | Descuenta flujos con $\text{FD}(t_i) \cdot e^{-s \cdot t_i}$ y devuelve `{'PrecioSucio', 'CuponCorrido', 'PrecioLimpio'}`. |
+| `_resolver_raiz(f, a, b, tol=1e-12, max_iter=200)` | ✅ Hecho (Wed 18) | Solver numérico por bisección pura en `[a, b]` sin dependencia de `scipy`. |
 | `z_spread(bono, curva, fecha_valor, precio_limpio_mercado)` | ✅ Hecho (Wed 18) | Resuelve el *z-spread* continuo $z$ en tanto por uno pre-calculando flujos y $\text{FD}_i$ fuera del bucle (~2s para los 2.165 bonos). |
 | `ytm(bono, fecha_valor, precio_limpio_mercado)` | 🔄 Stub (Thu 19) | *Stub actual*: `Coupon / Price` en decimal. *Planificado Thu 19*: TIR anual $\sum \text{CF}_i / (1+y)^{t_i} = P_{\text{sucio}}$. |
-| `risk_measures(bono, fecha_valor, y)` | 🔄 Stub (Thu 19) | *Stub actual*: aproximación *bullet*. *Planificado Thu 19*: Duración Macaulay (`Dur`), `ModDur = Dur/(1+y)`, `Convexidad` y `VarPrecioDurConv` para $\Delta y = -0.01$. |
+| `risk_measures(bono, fecha_valor, y)` | 🔄 Stub (Thu 19) | *Stub actual*: aproximación *bullet* (`{'Dur', 'ModDur', 'Convexidad'}`). *Planificado Thu 19*: Macaulay, ModDur, Convexidad y `VarPrecioDurConv` para $\Delta y = -0.01$. |
 
 ### Rol P2 — Data, Backtest, Stress (Secciones 1, 5 y 9)
 - **Sección 1 (Datos y QC)**: `load_universe`, `clean_universe`, `load_prices`, `clean_prices`, `qc_universe`, `qc_prices`. Detección de *outliers* (ej. `DE000A180B80` a `240.27` el `2024-12-24`, 33 picos reversibles $>10\%$, 313 columnas de fin de semana en `NaN`) y *forward-fill* $\le 5$ días hábiles.
