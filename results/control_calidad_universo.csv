@@ -1,0 +1,22 @@
+Caracteristica;NumObservaciones;NumMissing;NumValoresUnicos;Minimo;Maximo
+ISIN;2165;0;2165;;
+Description;2165;0;2163;;
+Ccy;2165;0;1;;
+Price;2165;0;2164;43.1028;121.4
+Issuer;2165;0;605;;
+Industry Sector;2165;0;9;;
+Maturity;2147;18;1438;2026-12-04 00:00:00;2083-06-30 00:00:00
+Coupon;2165;0;314;0.0;9.875
+Rating;2162;3;12;;
+PD 1YR;2142;23;543;2.94464e-12;0.063121921
+Outstanding Amount;2165;0;131;250003000;3000000000
+Callable;2165;0;2;;
+Next Call Date;1582;583;1159;2025-11-28 00:00:00;2061-03-14 00:00:00
+Seniority;2165;0;7;;
+Coupon Frequency;2165;0;2;1;2
+Coupon Type;2165;0;2;;
+First Coupon Date;2165;0;1142;2004-01-24 00:00:00;2025-02-01 00:00:00
+Penultimate Coupon Date;2147;18;1455;2025-12-04 00:00:00;2082-06-30 00:00:00
+Issue date;2165;0;1007;2003-01-24 00:00:00;2023-12-12 00:00:00
+Bid Price;2165;0;2162;42.8634;121.1417
+Ask Price;2165;0;2163;43.34221;121.6583
