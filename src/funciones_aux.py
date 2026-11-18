@@ -205,49 +205,78 @@ def z_spread(bono, curva, fecha_valor, precio_limpio_mercado):
 
 
 # ----------------------------------------------------------------------------------
-# SECCION 4: yield (TIR), duración de Macaulay, duración modificada y convexidad
+# SECCION 4: yield, duración y convexidad
 # ----------------------------------------------------------------------------------
 
 def ytm(bono, fecha_valor, precio_limpio_mercado):
     """
-    Yield to effective maturity (TIR en tanto por uno, capitalización compuesta anual, ACT/365):
-    tasa interna de retorno y que iguala el valor actual de los flujos futuros del bono
-    al precio sucio de mercado (precio limpio de mercado + cupón corrido):
+    Yield to maturity (TIR) del bono, en tanto por uno y capitalización ANUAL:
+    el tipo único y que iguala el valor actual de los flujos al precio SUCIO de mercado.
 
-        P_sucio = sum_i [ CF_i / (1 + y)^(t_i) ]
+        Precio sucio = Σ Flujo_i / (1 + y)^t_i      (t_i en años, base ACT/365)
+
+    Usa los mismos flujos que la valoración: hasta el vencimiento efectivo
+    (fecha call en los callable), como pide el enunciado.
     """
-    objetivo = precio_limpio_mercado + cupon_corrido(bono, fecha_valor)
     flujos = flujos_bono(bono, fecha_valor)
     t = flujos['Plazo'].values
     cf = flujos['Flujo'].values
 
-    # El precio sucio es estrictamente decreciente con la yield y > -1
-    f = lambda y: (cf * (1.0 + y) ** (-t)).sum() - objetivo
-    return _resolver_raiz(f, -0.50, 2.00)
+    # Objetivo: precio sucio de mercado = precio limpio + cupón corrido
+    objetivo = precio_limpio_mercado + cupon_corrido(bono, fecha_valor)
+
+    # Diferencia entre el valor actual con la yield y y el precio objetivo
+    f = lambda y: (cf / (1 + y) ** t).sum() - objetivo
+
+    # El valor actual baja al subir y: buscamos la raíz entre -50% y +500%
+    return _resolver_raiz(f, -0.5, 5.0)
 
 
 def risk_measures(bono, fecha_valor, y):
     """
-    Medidas de sensibilidad del bono a partir de su yield anual y (en tanto por uno):
-    - Dur        : Duración de Macaulay (años), media ponderada de los plazos t_i según el peso
-                   del valor actual de cada flujo en el precio sucio.
-    - ModDur     : Duración modificada = Dur / (1 + y), sensibilidad lineal relativa (-1/P · dP/dy).
-    - Convexidad : Convexidad = (1/P) · d²P/dy² = sum_i [ w_i · t_i · (t_i + 1) ] / (1 + y)².
+    Medidas de sensibilidad del bono a su yield y (tanto por uno, capitalización anual):
+    - Dur       : duración de Macaulay (años) = plazo medio de los flujos ponderado por su valor actual
+    - ModDur    : duración modificada = Dur / (1 + y); variación % del precio ante +1 de yield
+    - Convexidad: curvatura de la relación precio-yield
+    Usa los mismos flujos que la valoración (hasta el vencimiento efectivo).
     """
     flujos = flujos_bono(bono, fecha_valor)
     t = flujos['Plazo'].values
     cf = flujos['Flujo'].values
 
-    # Valor actual de cada flujo descontado con la yield anual del bono
-    pv = cf * (1.0 + y) ** (-t)
-    precio_sucio = pv.sum()
-    w = pv / precio_sucio
+    # Valor actual de cada flujo descontado con la yield
+    va = cf / (1 + y) ** t
+    precio = va.sum()
 
-    dur = float((w * t).sum())
-    mod_dur = float(dur / (1.0 + y))
-    convexidad = float((w * t * (t + 1.0)).sum() / ((1.0 + y) ** 2))
+    dur = (t * va).sum() / precio
+    mod_dur = dur / (1 + y)
+    convexidad = (t * (t + 1) * va).sum() / ((1 + y) ** 2 * precio)
 
     return {'Dur': dur, 'ModDur': mod_dur, 'Convexidad': convexidad}
+
+def variacion_precio_dur_conv(mod_dur, convexidad, dy):
+    """
+    Variación porcentual estimada del precio ante un cambio dy de la yield (tanto por uno),
+    con la aproximación de duración y convexidad:
+        ΔP/P ≈ -ModDur · dy + ½ · Convexidad · dy²
+    Devuelve la variación en % (p. ej. 5.09 = +5,09%).
+    """
+    return (-mod_dur * dy + 0.5 * convexidad * dy ** 2) * 100
+
+
+def variacion_precio_exacta(bono, fecha_valor, y, dy):
+    """
+    Variación porcentual EXACTA del precio ante un cambio dy de la yield: revaloramos
+    los flujos con la yield y + dy y la comparamos con el precio a la yield y.
+    Sirve para comprobar la precisión de la aproximación de duración y convexidad.
+    """
+    flujos = flujos_bono(bono, fecha_valor)
+    t = flujos['Plazo'].values
+    cf = flujos['Flujo'].values
+
+    precio_ini = (cf / (1 + y) ** t).sum()
+    precio_fin = (cf / (1 + y + dy) ** t).sum()
+    return (precio_fin / precio_ini - 1) * 100
 
 # ----------------------------------------------------------------------------------
 # SECCION 5: backtest de la cartera equiponderada
