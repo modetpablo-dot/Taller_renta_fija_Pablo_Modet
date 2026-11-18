@@ -217,3 +217,136 @@ def risk_measures(bono, fecha_valor, y):
     """STUB: duración aproximada = años hasta el vencimiento efectivo (bullet). Pendiente: Macaulay/Mod/Convexidad."""
     plazo = (fecha_vencimiento_efectiva(bono, fecha_valor) - fecha_valor).days / 365
     return {'Dur': plazo, 'ModDur': plazo / (1 + y), 'Convexidad': np.nan}
+
+# ----------------------------------------------------------------------------------
+# SECCION 5: backtest de la cartera equiponderada
+# ----------------------------------------------------------------------------------
+
+def fechas_fin_de_mes(fechas):
+    """Último día con mercado de cada mes, a partir de las fechas con precios."""
+    fechas = pd.DatetimeIndex(fechas)
+    serie = pd.Series(fechas, index=fechas)
+    # Agrupamos por (año, mes) y nos quedamos con la fecha máxima de cada grupo
+    return pd.DatetimeIndex(serie.groupby([fechas.year, fechas.month]).max().values)
+
+def cupones_cobrados(bono, desde, hasta):
+    """Cupones (por 100 de nominal) que paga el bono en el periodo (desde, hasta]."""
+    frecuencia = int(bono['Coupon Frequency'])
+    fechas = fechas_cupon(ancla_cupones(bono), frecuencia, desde, hasta)
+    return len(fechas) * bono['Coupon'] / frecuencia
+
+def rentabilidad_total_bono(bono, precio_ini, precio_fin, fecha_ini, fecha_fin):
+    """
+    Rentabilidad total de un bono entre dos fechas: variación de precio + cupón corrido
+    + cupones cobrados, sobre el precio sucio inicial.
+    """
+    sucio_ini = precio_ini + cupon_corrido(bono, fecha_ini)
+    valor_fin = precio_fin + cupon_corrido(bono, fecha_fin) + cupones_cobrados(bono, fecha_ini, fecha_fin)
+    return valor_fin / sucio_ini - 1
+
+def backtest_equiponderado(universo, precios, fechas_reb):
+    """
+    Backtest de una cartera equiponderada con rebalanceo en cada fecha de fechas_reb.
+    En cada fecha se invierte el mismo peso en todos los bonos vivos (ya emitidos y con precio).
+
+    Devuelve un DataFrame indexado por la fecha de fin de cada periodo con:
+    - 'Rent cartera': rentabilidad total de la cartera en el periodo (decimal)
+    - 'NumBonos'    : número de bonos en cartera durante el periodo
+    """
+    resultados = []
+
+    # Recorremos los periodos: (fecha inicio, fecha fin) consecutivas
+    for t0, t1 in zip(fechas_reb[:-1], fechas_reb[1:]):
+
+        # Bonos vivos en t0: ya emitidos y con precio en esa fecha
+        vivos = universo.index[(universo['Issue date'] <= t0) & precios.loc[t0].notna()]
+
+        # Rentabilidad total de cada bono vivo en el periodo
+        rent_bonos = [
+            rentabilidad_total_bono(bono, precios.at[t0, isin], precios.at[t1, isin], t0, t1)
+            for isin, bono in universo.loc[vivos].iterrows()
+        ]
+
+        # Cartera equiponderada: la rentabilidad es la media simple de los bonos
+        resultados.append({
+            'Fecha': t1,
+            'Rent cartera': np.mean(rent_bonos),
+            'NumBonos': len(vivos)
+        })
+
+    return pd.DataFrame(resultados).set_index('Fecha')
+
+# ----------------------------------------------------------------------------------
+# SECCION 1: tablas de control de calidad
+# ----------------------------------------------------------------------------------
+
+def control_calidad_universo(df):
+    """
+    Tabla de control de calidad del universo: una fila por característica (columna) con
+    nº de observaciones (datos no vacíos), nº de missing, nº de valores únicos y
+    mínimo/máximo (solo para columnas numéricas o de fecha).
+    """
+    filas = []
+    for col in df.columns:
+        serie = df[col]
+        # El mínimo y el máximo solo tienen sentido en números y fechas, no en texto
+        aplica_min_max = (pd.api.types.is_numeric_dtype(serie)
+                          or pd.api.types.is_datetime64_any_dtype(serie))
+        filas.append({
+            'Caracteristica': col,
+            'NumObservaciones': serie.notna().sum(),
+            'NumMissing': serie.isna().sum(),
+            'NumValoresUnicos': serie.nunique(),
+            'Minimo': serie.min() if aplica_min_max else np.nan,
+            'Maximo': serie.max() if aplica_min_max else np.nan,
+        })
+    return pd.DataFrame(filas).set_index('Caracteristica')
+
+def control_calidad_precios(precios):
+    """
+    Tabla de control de calidad de los precios históricos: una fila por bono con
+    nº de observaciones (precios disponibles), nº de missing, mínimo, máximo,
+    fecha de inicio y de fin de cotización, y nº de huecos dentro del periodo de cotización.
+
+    precios : DataFrame con filas = fechas y columnas = bonos (ISIN)
+    """
+    inicio = precios.apply(lambda serie: serie.first_valid_index())
+    fin = precios.apply(lambda serie: serie.last_valid_index())
+
+    # Huecos "reales": días sin precio ENTRE la primera y la última cotización
+    # (los NaN antes de la emisión no son un problema de calidad)
+    huecos = precios.apply(
+        lambda serie: serie.loc[serie.first_valid_index():serie.last_valid_index()].isna().sum()
+    )
+
+    tabla = pd.DataFrame({
+        'NumObservaciones': precios.notna().sum(),
+        'NumMissing': precios.isna().sum(),
+        'Minimo': precios.min(),
+        'Maximo': precios.max(),
+        'FechaInicio': inicio,
+        'FechaFin': fin,
+        'HuecosEntreCotizaciones': huecos,
+    })
+    tabla.index.name = 'ISIN'
+    return tabla
+
+def filtrar_spikes(precios, umbral=0.05):
+    """
+    Detecta precios anómalos (spikes): variación diaria mayor que 'umbral' que revierte
+    al día siguiente con otra variación mayor que 'umbral' de signo contrario.
+
+    Devuelve:
+    - una copia de los precios con esos valores a NaN (para rellenarlos después con el
+      último precio válido mediante forward fill)
+    - la máscara (True/False) de los spikes detectados
+    """
+    # Variación diaria de cada bono (rellenamos huecos solo para este cálculo)
+    rent = precios.ffill().pct_change(fill_method=None)
+    siguiente = rent.shift(-1)
+
+    # Spike: salto grande seguido de otro salto grande en sentido contrario
+    spikes = (rent.abs() > umbral) & (siguiente.abs() > umbral) & (rent * siguiente < 0)
+
+    # mask() pone NaN donde la condición es True; el resto de precios no cambia
+    return precios.mask(spikes), spikes
