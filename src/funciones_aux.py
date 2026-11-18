@@ -205,18 +205,139 @@ def z_spread(bono, curva, fecha_valor, precio_limpio_mercado):
 
 
 # ----------------------------------------------------------------------------------
-# STUBS (Thu 19, SECCION 4): firma final, lógica simplificada hasta que se implemente
+# SECCION 4: yield, duración y convexidad
 # ----------------------------------------------------------------------------------
 
 def ytm(bono, fecha_valor, precio_limpio_mercado):
-    """STUB: yield aproximada = cupón / precio limpio (decimal). Pendiente: yield anual exacta."""
-    return bono['Coupon'] / 100 / (precio_limpio_mercado / 100)
+    """
+    Yield to maturity (TIR) del bono, en tanto por uno y capitalización ANUAL:
+    el tipo único y que iguala el valor actual de los flujos al precio SUCIO de mercado.
+
+        Precio sucio = Σ Flujo_i / (1 + y)^t_i      (t_i en años, base ACT/365)
+
+    Usa los mismos flujos que la valoración: hasta el vencimiento efectivo
+    (fecha call en los callable), como pide el enunciado.
+    """
+    flujos = flujos_bono(bono, fecha_valor)
+    t = flujos['Plazo'].values
+    cf = flujos['Flujo'].values
+
+    # Objetivo: precio sucio de mercado = precio limpio + cupón corrido
+    objetivo = precio_limpio_mercado + cupon_corrido(bono, fecha_valor)
+
+    # Diferencia entre el valor actual con la yield y y el precio objetivo
+    f = lambda y: (cf / (1 + y) ** t).sum() - objetivo
+
+    # El valor actual baja al subir y: buscamos la raíz entre -50% y +500%
+    return _resolver_raiz(f, -0.5, 5.0)
 
 
 def risk_measures(bono, fecha_valor, y):
-    """STUB: duración aproximada = años hasta el vencimiento efectivo (bullet). Pendiente: Macaulay/Mod/Convexidad."""
-    plazo = (fecha_vencimiento_efectiva(bono, fecha_valor) - fecha_valor).days / 365
-    return {'Dur': plazo, 'ModDur': plazo / (1 + y), 'Convexidad': np.nan}
+    """
+    Medidas de sensibilidad del bono a su yield y (tanto por uno, capitalización anual):
+    - Dur       : duración de Macaulay (años) = plazo medio de los flujos ponderado por su valor actual
+    - ModDur    : duración modificada = Dur / (1 + y); variación % del precio ante +1 de yield
+    - Convexidad: curvatura de la relación precio-yield
+    Usa los mismos flujos que la valoración (hasta el vencimiento efectivo).
+    """
+    flujos = flujos_bono(bono, fecha_valor)
+    t = flujos['Plazo'].values
+    cf = flujos['Flujo'].values
+
+    # Valor actual de cada flujo descontado con la yield
+    va = cf / (1 + y) ** t
+    precio = va.sum()
+
+    dur = (t * va).sum() / precio
+    mod_dur = dur / (1 + y)
+    convexidad = (t * (t + 1) * va).sum() / ((1 + y) ** 2 * precio)
+
+    return {'Dur': dur, 'ModDur': mod_dur, 'Convexidad': convexidad}
+
+def variacion_precio_dur_conv(mod_dur, convexidad, dy):
+    """
+    Variación porcentual estimada del precio ante un cambio dy de la yield (tanto por uno),
+    con la aproximación de duración y convexidad:
+        ΔP/P ≈ -ModDur · dy + ½ · Convexidad · dy²
+    Devuelve la variación en % (p. ej. 5.09 = +5,09%).
+    """
+    return (-mod_dur * dy + 0.5 * convexidad * dy ** 2) * 100
+
+
+def variacion_precio_exacta(bono, fecha_valor, y, dy):
+    """
+    Variación porcentual EXACTA del precio ante un cambio dy de la yield: revaloramos
+    los flujos con la yield y + dy y la comparamos con el precio a la yield y.
+    Sirve para comprobar la precisión de la aproximación de duración y convexidad.
+    """
+    flujos = flujos_bono(bono, fecha_valor)
+    t = flujos['Plazo'].values
+    cf = flujos['Flujo'].values
+
+    precio_ini = (cf / (1 + y) ** t).sum()
+    precio_fin = (cf / (1 + y + dy) ** t).sum()
+    return (precio_fin / precio_ini - 1) * 100
+
+# ----------------------------------------------------------------------------------
+# SECCION 6: cartera bajo mandato (optimización)
+# ----------------------------------------------------------------------------------
+
+def optimizar_mandato(candidatos, max_n=20, max_dur=3, max_hy=0.10, max_emision=0.10, max_emisor=0.15,  col_emisor='Issuer'):
+    """
+    Cartera que maximiza la yield media ponderada cumpliendo las restricciones del mandato.
+    Se resuelve como un problema de programación lineal entera mixta (MILP):
+
+    Variables: w_i (peso de cada bono, continuo) y z_i (1 si el bono entra en cartera, binario).
+    Max  Σ w_i·Yield_i
+    s.a. Σ w_i = 1                         (invertimos el 100%)
+         Σ z_i <= max_n                    (como máximo max_n bonos)
+         Σ w_i·Dur_i <= max_dur            (duración de la cartera)
+         Σ w_i·HY_i <= max_hy              (exposición HY, incluidos los sin rating)
+         w_i <= max_emision · z_i          (máximo por emisión; y w_i = 0 si el bono no entra)
+         Σ w_i (mismo emisor) <= max_emisor
+
+    candidatos : DataFrame (índice ISIN) con columnas 'Yield', 'Dur', 'HY' (bool) e 'Issuer'
+    col_emisor : columna con la que se aplica el límite por emisor (p. ej. 'Grupo' para agrupar filiales)
+    Devuelve una Serie con los pesos de los bonos seleccionados (índice ISIN).
+    """
+    from scipy.optimize import milp, LinearConstraint, Bounds
+
+    n = len(candidatos)
+    yields = candidatos['Yield'].values
+    dur = candidatos['Dur'].values
+    hy = candidatos['HY'].values.astype(float)
+    ceros, unos = np.zeros(n), np.ones(n)
+
+    # Vector de variables: [w_1..w_n, z_1..z_n]. milp minimiza, así que usamos -yield
+    objetivo = np.concatenate([-yields, ceros])
+
+    # Restricciones generales (una fila cada una)
+    A = np.array([
+        np.concatenate([unos, ceros]),     # suma de pesos
+        np.concatenate([ceros, unos]),     # número de bonos
+        np.concatenate([dur, ceros]),      # duración
+        np.concatenate([hy, ceros]),       # exposición HY
+    ])
+    generales = LinearConstraint(A, [1, 0, -np.inf, -np.inf], [1, max_n, max_dur, max_hy])
+
+    # w_i - max_emision · z_i <= 0  (enlaza peso y selección)
+    enlace = LinearConstraint(np.hstack([np.eye(n), -max_emision * np.eye(n)]), -np.inf, 0)
+
+    # Una fila por emisor: suma de los pesos de sus bonos <= max_emisor
+    emisores = pd.get_dummies(candidatos[col_emisor]).T.values.astype(float)
+    por_emisor = LinearConstraint(np.hstack([emisores, np.zeros_like(emisores)]), -np.inf, max_emisor)
+
+    # Límites: 0 <= w_i <= max_emision ; z_i binaria (0 o 1)
+    limites = Bounds(0, np.concatenate([np.full(n, max_emision), unos]))
+    enteras = np.concatenate([ceros, unos])
+
+    resultado = milp(objetivo, constraints=[generales, enlace, por_emisor],
+                     integrality=enteras, bounds=limites)
+    if not resultado.success:
+        raise ValueError(f'No se ha encontrado una cartera válida: {resultado.message}')
+
+    pesos = pd.Series(resultado.x[:n], index=candidatos.index, name='Peso')
+    return pesos[pesos > 1e-6]
 
 # ----------------------------------------------------------------------------------
 # SECCION 5: backtest de la cartera equiponderada
