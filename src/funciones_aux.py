@@ -205,18 +205,78 @@ def z_spread(bono, curva, fecha_valor, precio_limpio_mercado):
 
 
 # ----------------------------------------------------------------------------------
-# STUBS (Thu 19, SECCION 4): firma final, lógica simplificada hasta que se implemente
+# SECCION 4: yield, duración y convexidad
 # ----------------------------------------------------------------------------------
 
 def ytm(bono, fecha_valor, precio_limpio_mercado):
-    """STUB: yield aproximada = cupón / precio limpio (decimal). Pendiente: yield anual exacta."""
-    return bono['Coupon'] / 100 / (precio_limpio_mercado / 100)
+    """
+    Yield to maturity (TIR) del bono, en tanto por uno y capitalización ANUAL:
+    el tipo único y que iguala el valor actual de los flujos al precio SUCIO de mercado.
+
+        Precio sucio = Σ Flujo_i / (1 + y)^t_i      (t_i en años, base ACT/365)
+
+    Usa los mismos flujos que la valoración: hasta el vencimiento efectivo
+    (fecha call en los callable), como pide el enunciado.
+    """
+    flujos = flujos_bono(bono, fecha_valor)
+    t = flujos['Plazo'].values
+    cf = flujos['Flujo'].values
+
+    # Objetivo: precio sucio de mercado = precio limpio + cupón corrido
+    objetivo = precio_limpio_mercado + cupon_corrido(bono, fecha_valor)
+
+    # Diferencia entre el valor actual con la yield y y el precio objetivo
+    f = lambda y: (cf / (1 + y) ** t).sum() - objetivo
+
+    # El valor actual baja al subir y: buscamos la raíz entre -50% y +500%
+    return _resolver_raiz(f, -0.5, 5.0)
 
 
 def risk_measures(bono, fecha_valor, y):
-    """STUB: duración aproximada = años hasta el vencimiento efectivo (bullet). Pendiente: Macaulay/Mod/Convexidad."""
-    plazo = (fecha_vencimiento_efectiva(bono, fecha_valor) - fecha_valor).days / 365
-    return {'Dur': plazo, 'ModDur': plazo / (1 + y), 'Convexidad': np.nan}
+    """
+    Medidas de sensibilidad del bono a su yield y (tanto por uno, capitalización anual):
+    - Dur       : duración de Macaulay (años) = plazo medio de los flujos ponderado por su valor actual
+    - ModDur    : duración modificada = Dur / (1 + y); variación % del precio ante +1 de yield
+    - Convexidad: curvatura de la relación precio-yield
+    Usa los mismos flujos que la valoración (hasta el vencimiento efectivo).
+    """
+    flujos = flujos_bono(bono, fecha_valor)
+    t = flujos['Plazo'].values
+    cf = flujos['Flujo'].values
+
+    # Valor actual de cada flujo descontado con la yield
+    va = cf / (1 + y) ** t
+    precio = va.sum()
+
+    dur = (t * va).sum() / precio
+    mod_dur = dur / (1 + y)
+    convexidad = (t * (t + 1) * va).sum() / ((1 + y) ** 2 * precio)
+
+    return {'Dur': dur, 'ModDur': mod_dur, 'Convexidad': convexidad}
+
+def variacion_precio_dur_conv(mod_dur, convexidad, dy):
+    """
+    Variación porcentual estimada del precio ante un cambio dy de la yield (tanto por uno),
+    con la aproximación de duración y convexidad:
+        ΔP/P ≈ -ModDur · dy + ½ · Convexidad · dy²
+    Devuelve la variación en % (p. ej. 5.09 = +5,09%).
+    """
+    return (-mod_dur * dy + 0.5 * convexidad * dy ** 2) * 100
+
+
+def variacion_precio_exacta(bono, fecha_valor, y, dy):
+    """
+    Variación porcentual EXACTA del precio ante un cambio dy de la yield: revaloramos
+    los flujos con la yield y + dy y la comparamos con el precio a la yield y.
+    Sirve para comprobar la precisión de la aproximación de duración y convexidad.
+    """
+    flujos = flujos_bono(bono, fecha_valor)
+    t = flujos['Plazo'].values
+    cf = flujos['Flujo'].values
+
+    precio_ini = (cf / (1 + y) ** t).sum()
+    precio_fin = (cf / (1 + y + dy) ** t).sum()
+    return (precio_fin / precio_ini - 1) * 100
 
 # ----------------------------------------------------------------------------------
 # SECCION 5: backtest de la cartera equiponderada
