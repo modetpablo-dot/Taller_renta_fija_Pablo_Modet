@@ -107,9 +107,9 @@ Taller_renta_fija_Pablo_Modet/
 | `cupon_corrido(bono, fecha_valor)` | ✅ Hecho (Tue 17) | Calcula el cupón corrido devengado por `100` de nominal en base `ACT/365`. |
 | `valorar_bono(bono, curva, fecha_valor, spread=0.0)` | ✅ Hecho (Tue 17) | Descuenta flujos con $\text{FD}(t_i) \cdot e^{-s \cdot t_i}$ y devuelve `{'PrecioSucio', 'CuponCorrido', 'PrecioLimpio'}`. |
 | `_resolver_raiz(f, a, b, tol=1e-12, max_iter=200)` | ✅ Hecho (Wed 18) | Solver numérico por bisección pura en `[a, b]` sin dependencia de `scipy`. |
-| `z_spread(bono, curva, fecha_valor, precio_limpio_mercado)` | ✅ Hecho (Wed 18) | Resuelve el *z-spread* continuo $z$ en tanto por uno pre-calculando flujos y $\text{FD}_i$ fuera del bucle (~2s para los 2.165 bonos). |
-| `ytm(bono, fecha_valor, precio_limpio_mercado)` | ✅ Hecho (Thu 19) | TIR en tanto por uno con capitalización compuesta anual (`ACT/365`): $\sum \text{CF}_i / (1+y)^{t_i} = P_{\text{sucio, mkt}}$. |
-| `risk_measures(bono, fecha_valor, y)` | ✅ Hecho (Thu 19) | Devuelve `{'Dur', 'ModDur', 'Convexidad'}` a partir de la *yield* anual $y$ (`ModDur = Dur/(1+y)`). |
+| `z_spread(bono, curva, fecha_valor, precio_limpio_mercado)` | ✅ Hecho (Wed 18) | Resuelve el *z-spread* continuo $z$ en tanto por uno pre-calculando flujos y $\text{FD}_i$ fuera del bucle ($\sum_{i=1}^n \text{CF}_i \cdot \text{FD}(t_i) e^{-z t_i} = P_{\text{sucio, mkt}}$, ~2s para los 2.165 bonos). |
+| `ytm(bono, fecha_valor, precio_limpio_mercado)` | ✅ Hecho (Thu 19) | TIR en tanto por uno con capitalización compuesta anual (`ACT/365`): $\sum_{i=1}^n \frac{\text{CF}_i}{(1+y)^{t_i}} = P_{\text{sucio, mkt}}$. |
+| `risk_measures(bono, fecha_valor, y)` | ✅ Hecho (Thu 19) | Devuelve `{'Dur', 'ModDur', 'Convexidad'}` a partir de la *yield* anual $y$: $\text{Dur} = \sum_i w_i t_i$, $\text{ModDur} = \frac{\text{Dur}}{1+y}$, $\text{Convexidad} = \frac{1}{(1+y)^2}\sum_i w_i t_i(t_i+1)$. |
 
 ### Rol P2 — Data, Backtest, Stress (Secciones 1, 5 y 9)
 - **Sección 1 (Datos y QC)**: `load_universe`, `clean_universe`, `load_prices`, `clean_prices`, `qc_universe`, `qc_prices`. Detección de *outliers* (ej. `DE000A180B80` a `240.27` el `2024-12-24`, 33 picos reversibles $>10\%$, 313 columnas de fin de semana en `NaN`) y *forward-fill* $\le 5$ días hábiles.
