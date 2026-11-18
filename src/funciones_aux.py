@@ -205,18 +205,49 @@ def z_spread(bono, curva, fecha_valor, precio_limpio_mercado):
 
 
 # ----------------------------------------------------------------------------------
-# STUBS (Thu 19, SECCION 4): firma final, lógica simplificada hasta que se implemente
+# SECCION 4: yield (TIR), duración de Macaulay, duración modificada y convexidad
 # ----------------------------------------------------------------------------------
 
 def ytm(bono, fecha_valor, precio_limpio_mercado):
-    """STUB: yield aproximada = cupón / precio limpio (decimal). Pendiente: yield anual exacta."""
-    return bono['Coupon'] / 100 / (precio_limpio_mercado / 100)
+    """
+    Yield to effective maturity (TIR en tanto por uno, capitalización compuesta anual, ACT/365):
+    tasa interna de retorno y que iguala el valor actual de los flujos futuros del bono
+    al precio sucio de mercado (precio limpio de mercado + cupón corrido):
+
+        P_sucio = sum_i [ CF_i / (1 + y)^(t_i) ]
+    """
+    objetivo = precio_limpio_mercado + cupon_corrido(bono, fecha_valor)
+    flujos = flujos_bono(bono, fecha_valor)
+    t = flujos['Plazo'].values
+    cf = flujos['Flujo'].values
+
+    # El precio sucio es estrictamente decreciente con la yield y > -1
+    f = lambda y: (cf * (1.0 + y) ** (-t)).sum() - objetivo
+    return _resolver_raiz(f, -0.50, 2.00)
 
 
 def risk_measures(bono, fecha_valor, y):
-    """STUB: duración aproximada = años hasta el vencimiento efectivo (bullet). Pendiente: Macaulay/Mod/Convexidad."""
-    plazo = (fecha_vencimiento_efectiva(bono, fecha_valor) - fecha_valor).days / 365
-    return {'Dur': plazo, 'ModDur': plazo / (1 + y), 'Convexidad': np.nan}
+    """
+    Medidas de sensibilidad del bono a partir de su yield anual y (en tanto por uno):
+    - Dur        : Duración de Macaulay (años), media ponderada de los plazos t_i según el peso
+                   del valor actual de cada flujo en el precio sucio.
+    - ModDur     : Duración modificada = Dur / (1 + y), sensibilidad lineal relativa (-1/P · dP/dy).
+    - Convexidad : Convexidad = (1/P) · d²P/dy² = sum_i [ w_i · t_i · (t_i + 1) ] / (1 + y)².
+    """
+    flujos = flujos_bono(bono, fecha_valor)
+    t = flujos['Plazo'].values
+    cf = flujos['Flujo'].values
+
+    # Valor actual de cada flujo descontado con la yield anual del bono
+    pv = cf * (1.0 + y) ** (-t)
+    precio_sucio = pv.sum()
+    w = pv / precio_sucio
+
+    dur = float((w * t).sum())
+    mod_dur = float(dur / (1.0 + y))
+    convexidad = float((w * t * (t + 1.0)).sum() / ((1.0 + y) ** 2))
+
+    return {'Dur': dur, 'ModDur': mod_dur, 'Convexidad': convexidad}
 
 # ----------------------------------------------------------------------------------
 # SECCION 5: backtest de la cartera equiponderada

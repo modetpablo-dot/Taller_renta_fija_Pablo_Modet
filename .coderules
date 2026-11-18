@@ -108,8 +108,8 @@ Taller_renta_fija_Pablo_Modet/
 | `valorar_bono(bono, curva, fecha_valor, spread=0.0)` | ✅ Hecho (Tue 17) | Descuenta flujos con $\text{FD}(t_i) \cdot e^{-s \cdot t_i}$ y devuelve `{'PrecioSucio', 'CuponCorrido', 'PrecioLimpio'}`. |
 | `_resolver_raiz(f, a, b, tol=1e-12, max_iter=200)` | ✅ Hecho (Wed 18) | Solver numérico por bisección pura en `[a, b]` sin dependencia de `scipy`. |
 | `z_spread(bono, curva, fecha_valor, precio_limpio_mercado)` | ✅ Hecho (Wed 18) | Resuelve el *z-spread* continuo $z$ en tanto por uno pre-calculando flujos y $\text{FD}_i$ fuera del bucle (~2s para los 2.165 bonos). |
-| `ytm(bono, fecha_valor, precio_limpio_mercado)` | 🔄 Stub (Thu 19) | *Stub actual*: `Coupon / Price` en decimal. *Planificado Thu 19*: TIR anual $\sum \text{CF}_i / (1+y)^{t_i} = P_{\text{sucio}}$. |
-| `risk_measures(bono, fecha_valor, y)` | 🔄 Stub (Thu 19) | *Stub actual*: aproximación *bullet* (`{'Dur', 'ModDur', 'Convexidad'}`). *Planificado Thu 19*: Macaulay, ModDur, Convexidad y `VarPrecioDurConv` para $\Delta y = -0.01$. |
+| `ytm(bono, fecha_valor, precio_limpio_mercado)` | ✅ Hecho (Thu 19) | TIR en tanto por uno con capitalización compuesta anual (`ACT/365`): $\sum \text{CF}_i / (1+y)^{t_i} = P_{\text{sucio, mkt}}$. |
+| `risk_measures(bono, fecha_valor, y)` | ✅ Hecho (Thu 19) | Devuelve `{'Dur', 'ModDur', 'Convexidad'}` a partir de la *yield* anual $y$ (`ModDur = Dur/(1+y)`). |
 
 ### Rol P2 — Data, Backtest, Stress (Secciones 1, 5 y 9)
 - **Sección 1 (Datos y QC)**: `load_universe`, `clean_universe`, `load_prices`, `clean_prices`, `qc_universe`, `qc_prices`. Detección de *outliers* (ej. `DE000A180B80` a `240.27` el `2024-12-24`, 33 picos reversibles $>10\%$, 313 columnas de fin de semana en `NaN`) y *forward-fill* $\le 5$ días hábiles.
@@ -123,18 +123,18 @@ Taller_renta_fija_Pablo_Modet/
 
 ---
 
-## 6. Golden Fixtures (Validación Obligatoria en Sección 2 y 3)
+## 6. Golden Fixtures (Validación Obligatoria en Secciones 2, 3 y 4)
 
 Cualquier cambio en el motor de valoración (`funciones_aux.py`) debe mantener la consistencia con los 6 *Golden Fixtures* verificados en `analisis_cartera.ipynb`:
 
-| ISIN | Caso de prueba | Vto. Efectivo | Precio Sucio (€STR) | Cupón Corrido | Precio Limpio (€STR) | Precio Mercado | Z-Spread (pb) |
-| :--- | :--- | :---: | :---: | :---: | :---: | :---: | :---: |
-| `XS0161488498` | Fijo anual estándar (no callable) | `2033-01-31` | `129.6691` | `3.9973` | `125.6718` | `118.4250` | `97.90` |
-| `XS1821883102` | Cupón semestral (`freq = 2`) | `2027-07-23` | `99.6443` | `0.2644` | `99.3799` | `98.8195` | `70.11` |
-| `FR0014001I50` | Cupón cero (`Coupon = 0`) | `2026-10-09` | `99.9562` | `0.0000` | `99.9562` | `99.9360` | `92.19` |
-| `XS1206541366` | Perpetuo (`Maturity = NaT` $\rightarrow$ *call*) | `2027-03-30` | `102.3095` | `1.3942` | `100.9153` | `100.3205` | `120.77` |
-| `XS1186176571` | *Call* pasada (`<= 01/10/2026` $\rightarrow$ `Maturity`) | `2027-05-11` | `99.7867` | `0.6258` | `99.1609` | `98.6780` | `80.60` |
-| `XS1405762805` | *Par-call* fuera de ciclo (*stub* `ACT/365`) | `2028-02-23` | `98.6857` | `0.5068` | `98.1788` | `97.1055` | `79.68` |
+| ISIN | Caso de prueba | Vto. Efectivo | Precio Sucio (€STR) | Cupón Corrido | Precio Limpio (€STR) | Precio Mercado | Z-Spread (pb) | Yield Anual (%) | Dur (años) | ModDur (años) | Convexidad |
+| :--- | :--- | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: |
+| `XS0161488498` | Fijo anual estándar (no callable) | `2033-01-24` | `129.0052` | `5.1370` | `123.8682` | `117.8740` | `92.36` | `4.208%` | `5.137` | `4.930` | `32.568` |
+| `XS1821883102` | Cupón semestral (`freq = 2`) | `2027-05-15` | `101.9245` | `1.3805` | `100.5440` | `100.3032` | `38.76` | `3.147%` | `0.610` | `0.592` | `0.928` |
+| `FR0014001I50` | Cupón cero (`Coupon = 0`) | `2026-10-14` | `99.9119` | `0.0000` | `99.9119` | `99.1852` | `2049.71` | `25.824%` | `0.036` | `0.028` | `0.023` |
+| `XS1206541366` | Perpetuo (`Maturity = NaT` $\rightarrow$ *call*) | `2030-03-20` | `102.9441` | `1.8699` | `101.0743` | `92.3097` | `272.53` | `6.011%` | `3.259` | `3.075` | `12.755` |
+| `XS1186176571` | *Call* pasada (`<= 01/10/2026` $\rightarrow$ `Maturity`) | `2030-02-11` | `95.7207` | `0.9534` | `94.7672` | `92.2724` | `80.64` | `3.995%` | `3.274` | `3.149` | `13.135` |
+| `XS1405762805` | *Par-call* fuera de ciclo (*stub* `ACT/365`) | `2026-12-07` | `101.0352` | `1.2247` | `99.8106` | `99.7505` | `32.41` | `2.865%` | `0.184` | `0.178` | `0.205` |
 
 ---
 
@@ -146,9 +146,9 @@ Todos los ficheros deben guardarse en `results/` con separador `;`, codificació
 | :---: | :--- | :---: | :--- |
 | **S1** | `control_calidad_universo.csv` | ⏳ P2 | Estadísticos por variable: observaciones, *missing*, únicos, mínimo y máximo. |
 | **S1** | `control_calidad_precios.csv` | ⏳ P2 | Por bono (`ISIN`): observaciones, *missing*, mínimo, máximo, fecha inicio y fecha fin. |
-| **S2** | `valoracion.csv` | ✅ P1 | `ISIN;PrecioSucio;CuponCorrido;PrecioLimpio` (2.165 filas). |
-| **S3** | `spread.csv` | ✅ P1 | `ISIN;Spread` (2.165 filas, `Spread` en tanto por uno). |
-| **S4** | `sensibilidad.csv` | ⏳ P1 (Thu 19) | `ISIN;Yield;Dur;ModDur;Convexidad;VarPrecioDurConv` (2.165 filas). |
+| **S2** | `valoracion.csv` | ✅ P1 | `ISIN;PrecioMercado;PrecioSucioCalculado;CuponCorrido;PrecioLimpioCalculado;DiferenciaMecadoCalculo;DiferenciaPct` (2.165 filas). |
+| **S3** | `spread.csv` | ✅ P1 | `ISIN;Spread;PrecioSpreadCero;PrecioSpreadCalculado` (2.165 filas, `Spread` en tanto por uno). |
+| **S4** | `sensibilidad.csv` | ✅ P1 | `ISIN;Yield;Dur;ModDur;Convexidad;VarPrecioDurConv` (2.165 filas, `Yield` en decimal, `VarPrecioDurConv` en `%` para $\Delta y = -1\%$). |
 | **S5** | `backtest_equal_weight.csv` | ⏳ P2 | `Fecha Mes;Rent cartera;Rent benchmark;Dif` |
 | **S6** | `cartera_optima.csv` | ⏳ P3 | `ISIN;Peso;Yield;Duration;Rating;Issuer;Outstanding Amount;Seniority;Industry Sector` + fila `CARTERA`. |
 | **S9** | `stress_test.csv` | ⏳ P2 | `Escenario;ValorCartera;P&L` |

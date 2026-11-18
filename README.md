@@ -25,8 +25,9 @@ Taller_renta_fija_Pablo_Modet/
 │   ├── funciones_aux.py                    # Motor de valoración, curvas, spreads y funciones auxiliares
 │   └── analisis_cartera.ipynb              # Cuaderno principal con las 9 secciones del análisis
 └── results/                                # Ficheros CSV de salida exigidos por el enunciado
-    ├── valoracion.csv                      # [Completado] Sección 2
-    └── spread.csv                          # [Completado] Sección 3
+    ├── valoracion.csv                      # [Completado - P1] Sección 2
+    ├── spread.csv                          # [Completado - P1] Sección 3
+    └── sensibilidad.csv                    # [Completado - P1] Sección 4
 ```
 
 ---
@@ -51,9 +52,9 @@ Estado de avance respecto a la planificación original:
 | :--- | :--- | :--- | :--- | :--- |
 | **Mon 16 Nov** | ✅ Curva, `interpolar_factor_descuento`, *stubs* (`ytm`, `risk_measures`) | 🔄 Loaders y EDA inicial en S1 (`analisis_cartera.ipynb`) | ⏳ Filtros de elegibilidad y esqueleto MILP | ✅ Kickoff: contratos de interfaz y decisiones |
 | **Tue 17 Nov** | ✅ Calendario de cupones, `cupon_corrido`, `valorar_bono`, regla de *calls* pasadas | ⏳ Generación de CSVs de QC y gráficos S1 | ⏳ MILP sobre *stubs* y borrador S6 | ✅ Motor de valoración operativo |
-| **Wed 18 Nov** | ✅ `valoracion.csv`, `z_spread`, `spread.csv`, *Golden Fixtures* y filtro `ZSpread_PocoFiable` | ⏳ S5 rentabilidad en precio (v1) | ⏳ Fórmulas y markdown de S7 y S8 | ✅ **Golden Fixtures superados (P1 al día)** |
-| **Thu 19 Nov** | ⏳ `ytm` real, `risk_measures` completas, `sensibilidad.csv` (S4) | ⏳ S5 *Total Return* y respuestas S1 | ⏳ Integrar *yields* reales en MILP | ⏳ Envío de dudas al profesor |
-| **Fri 20 Nov** | ⏳ Respuestas markdown S2–S4; congelación de API | ⏳ S9 versión Duración/Convexidad | ⏳ `cartera_optima.csv` (v1) | ⏳ Integración #1 |
+| **Wed 18 Nov** | ✅ `valoracion.csv`, `z_spread`, `spread.csv`, *Golden Fixtures* y filtro `ZSpread_PocoFiable` | ⏳ S5 rentabilidad en precio (v1) | ⏳ Fórmulas y markdown de S7 y S8 | ✅ Golden Fixtures superados |
+| **Thu 19 Nov** | ✅ `ytm` real, `risk_measures` completas, `sensibilidad.csv` (S4) | ⏳ S5 *Total Return* y respuestas S1 | ⏳ Integrar *yields* reales en MILP | ✅ Motor completo P1 operativo |
+| **Fri 20 Nov** | ✅ Respuestas markdown S2–S4; congelación de API de `funciones_aux.py` | ⏳ S9 versión Duración/Convexidad | ⏳ `cartera_optima.csv` (v1) | ✅ **Bloque P1 (S2–S4) 100% completado** |
 | **Sat 21 – Sun 22** | ⏳ Integrar S1–S4 en notebook único | ⏳ S9 revaluación completa (*full reval*) | ⏳ Números definitivos S7/S8 y presentación | ⏳ Revisión asíncrona |
 | **Mon 23 Nov** | ⏳ Integrar S5–S9; *Restart & Run All* | ⏳ Ajustes y correcciones | ⏳ Finalizar S6–S8 | — |
 | **Tue 24 Nov** | ⏳ Revisar bloque P2 | ⏳ Revisar bloque P3 | ⏳ Revisar bloque P1 | ⏳ Revisión cruzada de *checklist* |
@@ -97,5 +98,12 @@ Implementado en [funciones_aux.py](src/funciones_aux.py) y analizado en la **Sec
   - En los **1.917 bonos fiables** (`~universo['ZSpread_PocoFiable']`), el *z-spread* presenta una distribución limpia con media `90,5 pb`, mediana `87,9 pb`, desviación típica `35,9 pb` y rango `[4,2, 320,5] pb`.
 - **Entregable generado**: [results/spread.csv](results/spread.csv) (`ISIN;Spread` en tanto por uno, 2.165 bonos, 0 `NaN`).
 
-### 4. *Stubs* de Desbloqueo para Sección 4 (P1 – Mon 16 / Wed 18)
-- Se han incluido en [funciones_aux.py](src/funciones_aux.py) las firmas definitivas de `ytm(bono, fecha_valor, precio_limpio_mercado)` y `risk_measures(bono, fecha_valor, y)` con aproximaciones iniciales (*stubs* Day-1) para permitir el desarrollo en paralelo de las Secciones 6–9 antes de su implementación completa planificada para el **jueves 19 de noviembre**.
+### 4. Cálculo de *Yield*, Duración, Convexidad y Respuestas Markdown S2–S4 (P1 – Thu 19 & Fri 20)
+Implementado en [funciones_aux.py](src/funciones_aux.py) y analizado en la **Sección 4** de [analisis_cartera.ipynb](src/analisis_cartera.ipynb):
+- ***Yield* anual (`ytm`)**: resolución exacta por bisección de la TIR con capitalización compuesta anual y base `ACT/365` ($\sum \text{CF}_i / (1+y)^{t_i} = P_{\text{sucio, mkt}}$) hasta la fecha de vencimiento efectiva. Media del universo: **`4,16%`** (`0,0416`), mediana **`4,06%`** (`0,0406`).
+- **Medidas de sensibilidad (`risk_measures`)**:
+  - **Duración de Macaulay (`Dur`)**: vida media financiera ponderada por el valor actual de cada flujo (`media = 3,13` años, `mediana = 2,44` años, `máx = 23,13` años). Se verifica que $\text{Dur} = \text{Plazo\_efectivo}$ exactamente en los 14 bonos cupón cero y en los 407 bonos con un único flujo restante, y $\text{Dur} < \text{Plazo\_efectivo}$ en los 1.746 bonos restantes.
+  - **Duración Modificada (`ModDur` = `Dur / (1 + y)`)** y **Convexidad (`Convexidad`)**: verificadas analíticamente y contrastadas frente a diferencias finitas numéricas centradas (*bump & reprice* de $\pm 1\text{ pb}$, con discrepancia $< 10^{-8}$ en duración y $< 10^{-5}$ en convexidad).
+  - **Estimación de variación de precio ante $\Delta y = -1\%$ (`VarPrecioDurConv`)**: aproximación de Taylor de 2º orden $(-\text{ModDur}\cdot \Delta y + \frac{1}{2}\text{Convexidad}\cdot \Delta y^2) \times 100$, que estima una apreciación media del **`+3,10%`** (mediana **`+2,39%`**) y reduce el error medio frente a la revaluación exacta en casi 30 veces respecto a usar solo duración (`0,0038%` vs `0,1047%`).
+- **Respuestas Markdown completas (Secciones 2, 3 y 4)**: redactadas e integradas en [analisis_cartera.ipynb](src/analisis_cartera.ipynb) con todas las celdas ejecutadas y gráficos guardados.
+- **Entregable generado**: [results/sensibilidad.csv](results/sensibilidad.csv) (`ISIN;Yield;Dur;ModDur;Convexidad;VarPrecioDurConv`, 2.165 bonos, 0 `NaN`).
