@@ -279,6 +279,64 @@ def variacion_precio_exacta(bono, fecha_valor, y, dy):
     return (precio_fin / precio_ini - 1) * 100
 
 # ----------------------------------------------------------------------------------
+# SECCION 5: backtest de la cartera equiponderada
+# ----------------------------------------------------------------------------------
+
+def fechas_fin_de_mes(fechas):
+    """Último día con mercado de cada mes, a partir de las fechas con precios."""
+    fechas = pd.DatetimeIndex(fechas)
+    serie = pd.Series(fechas, index=fechas)
+    # Agrupamos por (año, mes) y nos quedamos con la fecha máxima de cada grupo
+    return pd.DatetimeIndex(serie.groupby([fechas.year, fechas.month]).max().values)
+
+def cupones_cobrados(bono, desde, hasta):
+    """Cupones (por 100 de nominal) que paga el bono en el periodo (desde, hasta]."""
+    frecuencia = int(bono['Coupon Frequency'])
+    fechas = fechas_cupon(ancla_cupones(bono), frecuencia, desde, hasta)
+    return len(fechas) * bono['Coupon'] / frecuencia
+
+def rentabilidad_total_bono(bono, precio_ini, precio_fin, fecha_ini, fecha_fin):
+    """
+    Rentabilidad total de un bono entre dos fechas: variación de precio + cupón corrido
+    + cupones cobrados, sobre el precio sucio inicial.
+    """
+    sucio_ini = precio_ini + cupon_corrido(bono, fecha_ini)
+    valor_fin = precio_fin + cupon_corrido(bono, fecha_fin) + cupones_cobrados(bono, fecha_ini, fecha_fin)
+    return valor_fin / sucio_ini - 1
+
+def backtest_equiponderado(universo, precios, fechas_reb):
+    """
+    Backtest de una cartera equiponderada con rebalanceo en cada fecha de fechas_reb.
+    En cada fecha se invierte el mismo peso en todos los bonos vivos (ya emitidos y con precio).
+
+    Devuelve un DataFrame indexado por la fecha de fin de cada periodo con:
+    - 'Rent cartera': rentabilidad total de la cartera en el periodo (decimal)
+    - 'NumBonos'    : número de bonos en cartera durante el periodo
+    """
+    resultados = []
+
+    # Recorremos los periodos: (fecha inicio, fecha fin) consecutivas
+    for t0, t1 in zip(fechas_reb[:-1], fechas_reb[1:]):
+
+        # Bonos vivos en t0: ya emitidos y con precio en esa fecha
+        vivos = universo.index[(universo['Issue date'] <= t0) & precios.loc[t0].notna()]
+
+        # Rentabilidad total de cada bono vivo en el periodo
+        rent_bonos = [
+            rentabilidad_total_bono(bono, precios.at[t0, isin], precios.at[t1, isin], t0, t1)
+            for isin, bono in universo.loc[vivos].iterrows()
+        ]
+
+        # Cartera equiponderada: la rentabilidad es la media simple de los bonos
+        resultados.append({
+            'Fecha': t1,
+            'Rent cartera': np.mean(rent_bonos),
+            'NumBonos': len(vivos)
+        })
+
+    return pd.DataFrame(resultados).set_index('Fecha')
+
+# ----------------------------------------------------------------------------------
 # SECCION 6: cartera bajo mandato (optimización)
 # ----------------------------------------------------------------------------------
 
@@ -338,64 +396,6 @@ def optimizar_mandato(candidatos, max_n=20, max_dur=3, max_hy=0.10, max_emision=
 
     pesos = pd.Series(resultado.x[:n], index=candidatos.index, name='Peso')
     return pesos[pesos > 1e-6]
-
-# ----------------------------------------------------------------------------------
-# SECCION 5: backtest de la cartera equiponderada
-# ----------------------------------------------------------------------------------
-
-def fechas_fin_de_mes(fechas):
-    """Último día con mercado de cada mes, a partir de las fechas con precios."""
-    fechas = pd.DatetimeIndex(fechas)
-    serie = pd.Series(fechas, index=fechas)
-    # Agrupamos por (año, mes) y nos quedamos con la fecha máxima de cada grupo
-    return pd.DatetimeIndex(serie.groupby([fechas.year, fechas.month]).max().values)
-
-def cupones_cobrados(bono, desde, hasta):
-    """Cupones (por 100 de nominal) que paga el bono en el periodo (desde, hasta]."""
-    frecuencia = int(bono['Coupon Frequency'])
-    fechas = fechas_cupon(ancla_cupones(bono), frecuencia, desde, hasta)
-    return len(fechas) * bono['Coupon'] / frecuencia
-
-def rentabilidad_total_bono(bono, precio_ini, precio_fin, fecha_ini, fecha_fin):
-    """
-    Rentabilidad total de un bono entre dos fechas: variación de precio + cupón corrido
-    + cupones cobrados, sobre el precio sucio inicial.
-    """
-    sucio_ini = precio_ini + cupon_corrido(bono, fecha_ini)
-    valor_fin = precio_fin + cupon_corrido(bono, fecha_fin) + cupones_cobrados(bono, fecha_ini, fecha_fin)
-    return valor_fin / sucio_ini - 1
-
-def backtest_equiponderado(universo, precios, fechas_reb):
-    """
-    Backtest de una cartera equiponderada con rebalanceo en cada fecha de fechas_reb.
-    En cada fecha se invierte el mismo peso en todos los bonos vivos (ya emitidos y con precio).
-
-    Devuelve un DataFrame indexado por la fecha de fin de cada periodo con:
-    - 'Rent cartera': rentabilidad total de la cartera en el periodo (decimal)
-    - 'NumBonos'    : número de bonos en cartera durante el periodo
-    """
-    resultados = []
-
-    # Recorremos los periodos: (fecha inicio, fecha fin) consecutivas
-    for t0, t1 in zip(fechas_reb[:-1], fechas_reb[1:]):
-
-        # Bonos vivos en t0: ya emitidos y con precio en esa fecha
-        vivos = universo.index[(universo['Issue date'] <= t0) & precios.loc[t0].notna()]
-
-        # Rentabilidad total de cada bono vivo en el periodo
-        rent_bonos = [
-            rentabilidad_total_bono(bono, precios.at[t0, isin], precios.at[t1, isin], t0, t1)
-            for isin, bono in universo.loc[vivos].iterrows()
-        ]
-
-        # Cartera equiponderada: la rentabilidad es la media simple de los bonos
-        resultados.append({
-            'Fecha': t1,
-            'Rent cartera': np.mean(rent_bonos),
-            'NumBonos': len(vivos)
-        })
-
-    return pd.DataFrame(resultados).set_index('Fecha')
 
 # ----------------------------------------------------------------------------------
 # SECCION 1: tablas de control de calidad
