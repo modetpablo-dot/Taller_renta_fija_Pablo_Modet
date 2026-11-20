@@ -471,3 +471,178 @@ def filtrar_spikes(precios, umbral=0.05):
 
     # mask() pone NaN donde la condición es True; el resto de precios no cambia
     return precios.mask(spikes), spikes
+
+
+# ----------------------------------------------------------------------------------
+# SECCION 7: cobertura de tipos de interés con futuros sobre deuda alemana
+# ----------------------------------------------------------------------------------
+
+PB = 1e-4                  # 1 pb en tanto por uno
+TAMANO_CONTRATO = 1e5      # nominal de un contrato de futuro (€)
+
+
+def dv01(valor, duracion_modificada):
+    """Euros que pierde una posición de `valor` si los tipos suben 1 pb."""
+    return valor * duracion_modificada * PB
+
+
+def dv01_futuro(duracion, precio_futuro, tamano_contrato=TAMANO_CONTRATO):
+    """DV01 de un contrato de futuro. Su valor es precio/100 * tamaño del contrato."""
+    return dv01(precio_futuro / 100 * tamano_contrato, duracion)
+
+
+def num_futuros(valor, duracion_cartera, duracion_futuro, precio_futuro,
+                tamano_contrato=TAMANO_CONTRATO):
+    """
+    Contratos a vender (sin redondear) para que el DV01 de los futuros iguale al de la cartera:
+        N = DV01 de la cartera / DV01 de un contrato
+    Las duraciones son las modificadas.
+    """
+    return dv01(valor, duracion_cartera) / dv01_futuro(duracion_futuro, precio_futuro,
+                                                       tamano_contrato)
+
+
+def tabla_cobertura_tipos(valor, duracion_cartera, futuros, contratos=None,
+                          tamano_contrato=TAMANO_CONTRATO):
+    """
+    Resultado de cubrir la cartera con cada futuro (una fila por ticker). `futuros` debe
+    tener las columnas 'Duracion' y 'Precio'.
+
+    Si `contratos` es None se venden los que cubren el 100% del DV01 (redondeados); si es un
+    número, ese mismo a todos los futuros (positivo = vender, negativo = comprar).
+    DV01Neto es el DV01 de cartera + futuros, y DuracionNeta ese DV01 pasado a duración.
+    Pct1Contrato es lo que pesa un contrato en el DV01 de la cartera.
+    """
+    dv01_c = dv01(valor, duracion_cartera)
+    t = pd.DataFrame(index=futuros.index)
+    t['Nocional1Contrato'] = futuros['Precio'] / 100 * tamano_contrato
+    t['DV01Contrato'] = dv01_futuro(futuros['Duracion'], futuros['Precio'], tamano_contrato)
+    t['Pct1Contrato'] = t['DV01Contrato'] / dv01_c * 100
+    t['ContratosExactos'] = num_futuros(valor, duracion_cartera, futuros['Duracion'],
+                                        futuros['Precio'], tamano_contrato)
+    if contratos is None:
+        t['Contratos'] = t['ContratosExactos'].round()
+    else:
+        t['Contratos'] = float(contratos)
+    t['NocionalFuturos'] = t['Contratos'] * t['Nocional1Contrato']
+    t['DV01Cobertura'] = -t['Contratos'] * t['DV01Contrato']    # si vendemos, restan
+    t['DV01Neto'] = dv01_c + t['DV01Cobertura']
+    t['PctCubierto'] = -t['DV01Cobertura'] / dv01_c * 100
+    t['DuracionNeta'] = t['DV01Neto'] / (valor * PB)
+    return t
+
+
+def cobertura_por_tramos(dv01_tramos, futuro_por_tramo, futuros, tamano_contrato=TAMANO_CONTRATO):
+    """
+    Cubre el DV01 de cada tramo de la curva con el futuro que le asignamos.
+    dv01_tramos      : Series con el DV01 (€/pb) de cada tramo
+    futuro_por_tramo : diccionario tramo -> ticker del futuro
+    futuros          : DataFrame con las columnas 'Duracion' y 'Precio'
+    """
+    t = pd.DataFrame({'DV01Tramo': dv01_tramos})
+    for tramo in t.index:
+        futuro = futuros.loc[futuro_por_tramo[tramo]]
+        t.loc[tramo, 'Futuro'] = futuro_por_tramo[tramo]
+        t.loc[tramo, 'DV01Contrato'] = dv01_futuro(futuro['Duracion'], futuro['Precio'],
+                                                   tamano_contrato)
+    t['Contratos'] = (t['DV01Tramo'] / t['DV01Contrato']).round()
+    t['DV01Neto'] = t['DV01Tramo'] - t['Contratos'] * t['DV01Contrato']
+    return t
+
+
+# ----------------------------------------------------------------------------------
+# SECCION 8: cobertura del riesgo de crédito con índices de CDS (iTraxx)
+# ----------------------------------------------------------------------------------
+
+SENSIBILIDAD_CDS = 4500.0  # €/pb del CDS por cada NOCIONAL_REF_CDS de nocional (enunciado)
+NOCIONAL_REF_CDS = 10e6    # nocional al que se refiere SENSIBILIDAD_CDS (€)
+
+
+def duracion_spread(bono, curva, fecha_valor, spread, salto=PB):
+    """
+    Duración spread del bono (años): sensibilidad del precio sucio al z-spread. Se revalora
+    el bono con el spread un poco más alto y un poco más bajo y se mide cuánto cambia el precio.
+    """
+    p0 = valorar_bono(bono, curva, fecha_valor, spread)['PrecioSucio']
+    p_sube = valorar_bono(bono, curva, fecha_valor, spread + salto)['PrecioSucio']
+    p_baja = valorar_bono(bono, curva, fecha_valor, spread - salto)['PrecioSucio']
+    return (p_baja - p_sube) / (2 * salto * p0)
+
+
+def nocional_cds(cs01_cartera, beta=1.0, sensibilidad_cds=SENSIBILIDAD_CDS,
+                 nocional_ref=NOCIONAL_REF_CDS):
+    """
+    Nocional (€) de protección a comprar para que el CDS gane lo que pierde la cartera cuando
+    suben los spreads. `beta` son los pb que sube el spread de la cartera por cada pb del índice.
+    """
+    return cs01_cartera * beta / sensibilidad_cds * nocional_ref
+
+
+def pago_anual_spread(importe, spread_pb):
+    """Euros al año de un spread (en pb) sobre un importe: coste de la protección o carry."""
+    return importe * spread_pb * PB
+
+
+def rentabilidad_cartera(precios, pesos, frecuencia='W-FRI'):
+    """
+    Rentabilidad semanal (por defecto) de una cartera con pesos fijos, a partir de los precios
+    limpios. Se descartan las semanas en las que falta el precio de algún bono.
+    """
+    p = precios[pesos.index].resample(frecuencia).last()
+    rent = p.pct_change(fill_method=None)
+    return (rent * pesos).sum(axis=1, min_count=len(pesos)).dropna()
+
+
+def regresion_ols(y, X):
+    """Regresión lineal con constante (y = a + X·b). Devuelve los coeficientes y el R²."""
+    datos = pd.concat([y.rename('_y'), X], axis=1).dropna()
+    A = np.column_stack([np.ones(len(datos)), datos[X.columns].to_numpy()])
+    yv = datos['_y'].to_numpy()
+    coef, *_ = np.linalg.lstsq(A, yv, rcond=None)
+    residuos = yv - A @ coef
+    r2 = 1 - (residuos ** 2).sum() / ((yv - yv.mean()) ** 2).sum()
+    return pd.Series(coef, index=['Constante'] + list(X.columns)), r2
+
+
+def beta_credito(rent_cartera, rent_tipos, nivel_indice, valor, cs01_cartera):
+    """
+    Beta de la cartera frente a un índice de crédito: regresión de la rentabilidad de la
+    cartera sobre la variación del índice (en pb), con la rentabilidad de los futuros como
+    control de tipos. Devuelve los € que pierde la cartera por cada pb que sube el índice,
+    la beta (esa pérdida entre el CS01 de la cartera) y el R².
+    """
+    X = rent_tipos.assign(dIndice=nivel_indice.diff())
+    coef, r2 = regresion_ols(rent_cartera, X)
+    eur_por_pb = -coef['dIndice'] * valor
+    return {'EurPorPbIndice': eur_por_pb, 'Beta': eur_por_pb / cs01_cartera, 'R2': r2}
+
+
+# ----------------------------------------------------------------------------------
+# SECCION 9: stress test recalculando el precio de cada bono
+# ----------------------------------------------------------------------------------
+
+def revalorar_cartera(pesos, universo, curva, fecha_valor, spreads, es_hy, escenarios, valor):
+    """
+    Valor (€) de la posición en cada bono en cada escenario (una fila por ISIN, una columna
+    por escenario). `escenarios`: nombre -> {'tipos', 'ig', 'hy'}, shocks en tanto por uno.
+    El shock de tipos se suma al spread: con la curva y el spread en capitalización continua,
+    subir toda la curva lo mismo equivale a sumarlo al spread.
+        valor en el escenario = peso * valor * precio sucio con shock / precio sucio de hoy
+    """
+    filas = {}
+    for isin, peso in pesos.items():
+        bono, s = universo.loc[isin], spreads[isin]
+        p0 = valorar_bono(bono, curva, fecha_valor, s)['PrecioSucio']
+        filas[isin] = {}
+        for nombre, shock in escenarios.items():
+            choque = shock['tipos'] + (shock['hy'] if es_hy[isin] else shock['ig'])
+            p = valorar_bono(bono, curva, fecha_valor, s + choque)['PrecioSucio']
+            filas[isin][nombre] = peso * valor * p / p0
+    return pd.DataFrame(filas).T.rename_axis('ISIN')
+
+
+def tabla_stress(detalle, base='Base'):
+    """Valor de la cartera y P&L frente al escenario base (columnas de stress_test.csv)."""
+    valor = detalle.sum()
+    return pd.DataFrame({'Escenario': valor.index, 'ValorCartera': valor.values,
+                         'P&L': (valor - valor[base]).values})
