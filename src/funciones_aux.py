@@ -615,3 +615,34 @@ def beta_credito(rent_cartera, rent_tipos, nivel_indice, valor, cs01_cartera):
     coef, r2 = regresion_ols(rent_cartera, X)
     eur_por_pb = -coef['dIndice'] * valor
     return {'EurPorPbIndice': eur_por_pb, 'Beta': eur_por_pb / cs01_cartera, 'R2': r2}
+
+
+# ----------------------------------------------------------------------------------
+# SECCION 9: stress test recalculando el precio de cada bono
+# ----------------------------------------------------------------------------------
+
+def revalorar_cartera(pesos, universo, curva, fecha_valor, spreads, es_hy, escenarios, valor):
+    """
+    Valor (€) de la posición en cada bono en cada escenario (una fila por ISIN, una columna
+    por escenario). `escenarios`: nombre -> {'tipos', 'ig', 'hy'}, shocks en tanto por uno.
+    El shock de tipos se suma al spread: con la curva y el spread en capitalización continua,
+    subir toda la curva lo mismo equivale a sumarlo al spread.
+        valor en el escenario = peso * valor * precio sucio con shock / precio sucio de hoy
+    """
+    filas = {}
+    for isin, peso in pesos.items():
+        bono, s = universo.loc[isin], spreads[isin]
+        p0 = valorar_bono(bono, curva, fecha_valor, s)['PrecioSucio']
+        filas[isin] = {}
+        for nombre, shock in escenarios.items():
+            choque = shock['tipos'] + (shock['hy'] if es_hy[isin] else shock['ig'])
+            p = valorar_bono(bono, curva, fecha_valor, s + choque)['PrecioSucio']
+            filas[isin][nombre] = peso * valor * p / p0
+    return pd.DataFrame(filas).T.rename_axis('ISIN')
+
+
+def tabla_stress(detalle, base='Base'):
+    """Valor de la cartera y P&L frente al escenario base (columnas de stress_test.csv)."""
+    valor = detalle.sum()
+    return pd.DataFrame({'Escenario': valor.index, 'ValorCartera': valor.values,
+                         'P&L': (valor - valor[base]).values})
