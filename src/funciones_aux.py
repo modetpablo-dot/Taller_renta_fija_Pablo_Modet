@@ -548,3 +548,70 @@ def cobertura_por_tramos(dv01_tramos, futuro_por_tramo, futuros, tamano_contrato
     t['Contratos'] = (t['DV01Tramo'] / t['DV01Contrato']).round()
     t['DV01Neto'] = t['DV01Tramo'] - t['Contratos'] * t['DV01Contrato']
     return t
+
+
+# ----------------------------------------------------------------------------------
+# SECCION 8: cobertura del riesgo de crédito con índices de CDS (iTraxx)
+# ----------------------------------------------------------------------------------
+
+SENSIBILIDAD_CDS = 4500.0  # €/pb del CDS por cada NOCIONAL_REF_CDS de nocional (enunciado)
+NOCIONAL_REF_CDS = 10e6    # nocional al que se refiere SENSIBILIDAD_CDS (€)
+
+
+def duracion_spread(bono, curva, fecha_valor, spread, salto=PB):
+    """
+    Duración spread del bono (años): sensibilidad del precio sucio al z-spread. Se revalora
+    el bono con el spread un poco más alto y un poco más bajo y se mide cuánto cambia el precio.
+    """
+    p0 = valorar_bono(bono, curva, fecha_valor, spread)['PrecioSucio']
+    p_sube = valorar_bono(bono, curva, fecha_valor, spread + salto)['PrecioSucio']
+    p_baja = valorar_bono(bono, curva, fecha_valor, spread - salto)['PrecioSucio']
+    return (p_baja - p_sube) / (2 * salto * p0)
+
+
+def nocional_cds(cs01_cartera, beta=1.0, sensibilidad_cds=SENSIBILIDAD_CDS,
+                 nocional_ref=NOCIONAL_REF_CDS):
+    """
+    Nocional (€) de protección a comprar para que el CDS gane lo que pierde la cartera cuando
+    suben los spreads. `beta` son los pb que sube el spread de la cartera por cada pb del índice.
+    """
+    return cs01_cartera * beta / sensibilidad_cds * nocional_ref
+
+
+def pago_anual_spread(importe, spread_pb):
+    """Euros al año de un spread (en pb) sobre un importe: coste de la protección o carry."""
+    return importe * spread_pb * PB
+
+
+def rentabilidad_cartera(precios, pesos, frecuencia='W-FRI'):
+    """
+    Rentabilidad semanal (por defecto) de una cartera con pesos fijos, a partir de los precios
+    limpios. Se descartan las semanas en las que falta el precio de algún bono.
+    """
+    p = precios[pesos.index].resample(frecuencia).last()
+    rent = p.pct_change(fill_method=None)
+    return (rent * pesos).sum(axis=1, min_count=len(pesos)).dropna()
+
+
+def regresion_ols(y, X):
+    """Regresión lineal con constante (y = a + X·b). Devuelve los coeficientes y el R²."""
+    datos = pd.concat([y.rename('_y'), X], axis=1).dropna()
+    A = np.column_stack([np.ones(len(datos)), datos[X.columns].to_numpy()])
+    yv = datos['_y'].to_numpy()
+    coef, *_ = np.linalg.lstsq(A, yv, rcond=None)
+    residuos = yv - A @ coef
+    r2 = 1 - (residuos ** 2).sum() / ((yv - yv.mean()) ** 2).sum()
+    return pd.Series(coef, index=['Constante'] + list(X.columns)), r2
+
+
+def beta_credito(rent_cartera, rent_tipos, nivel_indice, valor, cs01_cartera):
+    """
+    Beta de la cartera frente a un índice de crédito: regresión de la rentabilidad de la
+    cartera sobre la variación del índice (en pb), con la rentabilidad de los futuros como
+    control de tipos. Devuelve los € que pierde la cartera por cada pb que sube el índice,
+    la beta (esa pérdida entre el CS01 de la cartera) y el R².
+    """
+    X = rent_tipos.assign(dIndice=nivel_indice.diff())
+    coef, r2 = regresion_ols(rent_cartera, X)
+    eur_por_pb = -coef['dIndice'] * valor
+    return {'EurPorPbIndice': eur_por_pb, 'Beta': eur_por_pb / cs01_cartera, 'R2': r2}
