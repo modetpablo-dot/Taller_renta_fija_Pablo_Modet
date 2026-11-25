@@ -39,7 +39,7 @@ Taller_renta_fija_Pablo_Modet/
 ├── src/
 │   ├── funciones_aux.py                # Motor modular reutilizable (importado como `import funciones_aux as fa`)
 │   └── analisis_cartera.ipynb          # Cuaderno principal con las 9 secciones del taller
-└── results/                            # Carpeta de salida para los 9 ficheros CSV requeridos
+└── results/                            # Carpeta de salida para los 8 ficheros CSV requeridos
 ```
 
 ### Reglas de edición del Notebook (`src/analisis_cartera.ipynb`)
@@ -54,12 +54,13 @@ Taller_renta_fija_Pablo_Modet/
 - **No utilices `/usr/bin/python3` del sistema** (no dispone de `numpy` ni `pandas`).
 - **Intérprete recomendado para ejecución y validación por terminal**:
   ```bash
-  .venv/bin/python
+  .venv/bin/python             # Linux / macOS
+  .venv\Scripts\python.exe     # Windows
   ```
-  - El directorio `src/` está registrado en `.venv/lib/python3.11/site-packages/taller_rf.pth`, por lo que `import funciones_aux as fa` funciona directamente desde cualquier directorio de trabajo.
-- **Sin dependencia obligatoria de `scipy`**:
-  - El entorno `.venv` anterior contiene `numpy`, `pandas` y `matplotlib`, pero **no tiene `scipy` instalado**.
-  - Por tanto, en `src/funciones_aux.py` los métodos numéricos (búsqueda de raíces para *z-spread* y TIR, correlaciones de Spearman mediante `.rank().corr()`, etc.) deben mantenerse en **Python / NumPy / Pandas puro** (como `_resolver_raiz` por bisección), salvo que se verifique explícitamente la presencia de `scipy` en el entorno activo.
+  - En Linux, el directorio `src/` está registrado en `.venv/lib/python3.11/site-packages/taller_rf.pth`, por lo que `import funciones_aux as fa` funciona directamente desde cualquier directorio de trabajo. En otros entornos, ejecutar desde `src/` (como hace el notebook).
+- **`scipy` es necesario solo para la Sección 6**:
+  - `optimizar_mandato` usa `scipy.optimize.milp` (solver HiGHS) para el MILP del mandato, con importación local dentro de la función. El `.venv` debe tener `scipy` instalado para ejecutar el notebook completo.
+  - El resto de métodos numéricos de `src/funciones_aux.py` (búsqueda de raíces para *z-spread* y TIR, correlaciones de Spearman mediante `.rank().corr()`, etc.) se mantienen en **Python / NumPy / Pandas puro** (como `_resolver_raiz` por bisección).
 - **Matplotlib en modo consola**: exportar `MPLCONFIGDIR=/home/sergio/pip_tmp` y usar `matplotlib.use('Agg')` en scripts de prueba para evitar avisos de caché.
 
 ---
@@ -112,14 +113,14 @@ Taller_renta_fija_Pablo_Modet/
 | `risk_measures(bono, fecha_valor, y)` | ✅ Hecho (Thu 19) | Devuelve `{'Dur', 'ModDur', 'Convexidad'}` a partir de la *yield* anual $y$: $\text{Dur} = \sum_i w_i t_i$, $\text{ModDur} = \frac{\text{Dur}}{1+y}$, $\text{Convexidad} = \frac{1}{(1+y)^2}\sum_i w_i t_i(t_i+1)$. |
 
 ### Rol P2 — Data, Backtest, Stress (Secciones 1, 5 y 9)
-- **Sección 1 (Datos y QC)**: `load_universe`, `clean_universe`, `load_prices`, `clean_prices`, `qc_universe`, `qc_prices`. Detección de *outliers* (ej. `DE000A180B80` a `240.27` el `2024-12-24`, 33 picos reversibles $>10\%$, 313 columnas de fin de semana en `NaN`) y *forward-fill* $\le 5$ días hábiles.
-- **Sección 5 (Backtest Equal Weight)**: `month_end_dates`, `backtest_equal_weight` (rebalanceo en último día hábil de cada mes, rentabilidad *Total Return* incluyendo variación de precio limpio + variación de cupón corrido + cupones cobrados frente a `RECMTREU`).
-- **Sección 9 (Stress Test)**: `stress_test(weights, universe, curve, fecha, V=1e8, scenarios)` por revaluación completa sobre cartera de $100\text{M€}$ en escenarios Base, A (+100 pb tipos), B (ampliación de *spreads* de crédito) y C (combinado A+B).
+- **Sección 1 (Datos y QC)**: `control_calidad_universo`, `control_calidad_precios`, `filtrar_spikes` (la carga y limpieza se hacen en el notebook). Detección de *outliers* (ej. `DE000A180B80` a `240.27` el `2024-12-24`; 46 saltos que revierten al día siguiente en 40 bonos, 65 movimientos diarios $>10\%$ en 31 bonos), eliminación de 313 días de fin de semana y 10 festivos, y *forward-fill* sin límite de los huecos restantes (284 días en 147 bonos; máximo 31 días).
+- **Sección 5 (Backtest Equal Weight)**: `fechas_fin_de_mes`, `cupones_cobrados`, `rentabilidad_total_bono`, `rentabilidad_cartera`, `backtest_equiponderado` (rebalanceo en último día hábil de cada mes, rentabilidad *Total Return* incluyendo variación de precio limpio + variación de cupón corrido + cupones cobrados frente a `RECMTREU`).
+- **Sección 9 (Stress Test)**: `revalorar_cartera` y `tabla_stress` por revaluación completa sobre cartera de $100\text{M€}$ en escenarios Base, A (+100 pb tipos), B (ampliación de *spreads* de crédito) y C (combinado A+B).
 
 ### Rol P3 — Portfolio, Hedging, Deck (Secciones 6, 7 y 8)
-- **Sección 6 (Mandato de Inversión)**: `eligible_mask`, `optimise_mandate`, `portfolio_stats`. Maximizar *yield* de la cartera sujeto a: bonos vivos, nominal $> 500\text{M€}$ (excluye los 641 bonos con exactamente $500\text{M€}$), sin deuda subordinada (excluyendo también `Sr Non Preferred`), máx. 20 bonos, peso por emisión $\le 10\%$, peso por emisor $\le 15\%$, peso High Yield $\le 10\%$ (tratando `NR` y `NaN` como HY por prudencia), y duración de cartera $\le 3$ años.
-- **Sección 7 (Cobertura de Tipos)**: `n_futures` usando futuro sobre *Schatz* (`DU1`, precio `104.925`, nominal `100.000 €`).
-- **Sección 8 (Cobertura de Crédito)**: `cds_notional` usando CDS **iTraxx Main** ($4.500\text{ €/pb}$ por cada $10\text{M€}$ de nocional $\Rightarrow$ duración de *spread* $\approx 4.5$).
+- **Sección 6 (Mandato de Inversión)**: `optimizar_mandato` (MILP con `scipy.optimize.milp`; los filtros de elegibilidad y las estadísticas de la cartera se calculan en el notebook). Maximizar *yield* de la cartera sujeto a: bonos vivos, nominal $> 500\text{M€}$ (excluye los 641 bonos con exactamente $500\text{M€}$), sin deuda subordinada (excluyendo también `Sr Non Preferred`), máx. 20 bonos, peso por emisión $\le 10\%$, peso por emisor $\le 15\%$, peso High Yield $\le 10\%$ (tratando `NR` y `NaN` como HY por prudencia), y duración de cartera $\le 3$ años.
+- **Sección 7 (Cobertura de Tipos)**: `dv01`, `dv01_futuro`, `num_futuros`, `tabla_cobertura_tipos`, `cobertura_por_tramos` usando futuro sobre *Schatz* (`DU1`, precio `104.925`, nominal `100.000 €`) para una cartera de 10 M€.
+- **Sección 8 (Cobertura de Crédito)**: `duracion_spread`, `regresion_ols`, `beta_credito`, `nocional_cds`, `pago_anual_spread` usando CDS **iTraxx Main** ($4.500\text{ €/pb}$ por cada $10\text{M€}$ de nocional $\Rightarrow$ duración de *spread* $\approx 4.5$).
 
 ---
 
@@ -144,11 +145,11 @@ Todos los ficheros deben guardarse en `results/` con separador `;`, codificació
 
 | Sección | Fichero en `results/` | Estado | Columnas requeridas / Formato |
 | :---: | :--- | :---: | :--- |
-| **S1** | `control_calidad_universo.csv` | ⏳ P2 | Estadísticos por variable: observaciones, *missing*, únicos, mínimo y máximo. |
-| **S1** | `control_calidad_precios.csv` | ⏳ P2 | Por bono (`ISIN`): observaciones, *missing*, mínimo, máximo, fecha inicio y fecha fin. |
+| **S1** | `control_calidad_universo.csv` | ✅ P2 | `Caracteristica;NumObservaciones;NumMissing;NumValoresUnicos;Minimo;Maximo` (21 filas; mínimo y máximo vacíos en columnas de texto). |
+| **S1** | `control_calidad_precios.csv` | ✅ P2 | `ISIN;NumObservaciones;NumMissing;Minimo;Maximo;FechaInicio;FechaFin;HuecosEntreCotizaciones` (2.165 filas). |
 | **S2** | `valoracion.csv` | ✅ P1 | `ISIN;PrecioMercado;PrecioSucioCalculado;CuponCorrido;PrecioLimpioCalculado;DiferenciaMecadoCalculo;DiferenciaPct` (2.165 filas). |
 | **S3** | `spread.csv` | ✅ P1 | `ISIN;Spread;PrecioSpreadCero;PrecioSpreadCalculado` (2.165 filas, `Spread` en tanto por uno). |
 | **S4** | `sensibilidad.csv` | ✅ P1 | `ISIN;Yield;Dur;ModDur;Convexidad;VarPrecioDurConv` (2.165 filas, `Yield` en decimal, `VarPrecioDurConv` en `%` para $\Delta y = -1\%$). |
-| **S5** | `backtest_equal_weight.csv` | ⏳ P2 | `Fecha Mes;Rent cartera;Rent benchmark;Dif` |
-| **S6** | `cartera_optima.csv` | ⏳ P3 | `ISIN;Peso;Yield;Duration;Rating;Issuer;Outstanding Amount;Seniority;Industry Sector` + fila `CARTERA`. |
-| **S9** | `stress_test.csv` | ⏳ P2 | `Escenario;ValorCartera;P&L` |
+| **S5** | `backtest_equal_weight.csv` | ✅ P2 | `Fecha Mes;Rent cartera;Rent benchmark;Dif` (36 filas). |
+| **S6** | `cartera_optima.csv` | ✅ P3 | `ISIN;Peso;Yield;Duration;Rating;Issuer;Outstanding Amount;Seniority;Industry Sector` + fila `CARTERA` (13 filas). |
+| **S9** | `stress_test.csv` | ✅ P2 | `Escenario;ValorCartera;P&L` (4 filas). |
