@@ -45,9 +45,9 @@ Según el *Planning Brief* ([docs/planning_brief.pptx](docs/planning_brief.pptx)
 
 | Rol | Responsabilidad Principal | Secciones | Funciones Principales en `funciones_aux.py` | Entregables CSV (`results/`) |
 | :--- | :--- | :--- | :--- | :--- |
-| **P1 – Pricing core + integrator** | Motor de curva, valoración, *z-spread*, sensibilidad e integración final | **S2** (L), **S3** (S), **S4** (M) | `interpolar_factor_descuento`, `fecha_vencimiento_efectiva`, `generar_fechas_cupon`, `cupon_corrido`, `flujos_bono`, `valorar_bono`, `z_spread`, `ytm`, `risk_measures` | `valoracion.csv`, `spread.csv`, `sensibilidad.csv` |
-| **P2 – Data, backtest, stress** | Control de calidad, limpieza de datos, *backtest* equiponderado y *stress test* | **S1** (M), **S5** (M), **S9** (M) | `load_universe`, `clean_universe`, `load_prices`, `clean_prices`, `qc_universe`, `qc_prices`, `month_end_dates`, `backtest_equal_weight`, `stress_test` | `control_calidad_universo.csv`, `control_calidad_precios.csv`, `backtest_equal_weight.csv`, `stress_test.csv` |
-| **P3 – Portfolio, hedging, deck** | Cartera óptima (MILP), coberturas de tipos/crédito y presentación | **S6** (L), **S7** (S), **S8** (S), Slides | `eligible_mask`, `optimizar_mandato`, `portfolio_stats`, `n_futures`, `cds_notional` | `cartera_optima.csv` |
+| **P1 – Pricing core + integrator** | Motor de curva, valoración, *z-spread*, sensibilidad e integración final | **S2** (L), **S3** (S), **S4** (M) | `factor_descuento`, `fecha_vencimiento_efectiva`, `fechas_cupon`, `cupon_corrido`, `flujos_bono`, `valorar_bono`, `z_spread`, `ytm`, `risk_measures`, `variacion_precio_dur_conv`, `variacion_precio_exacta` | `valoracion.csv`, `spread.csv`, `sensibilidad.csv` |
+| **P2 – Data, backtest, stress** | Control de calidad, limpieza de datos, *backtest* equiponderado y *stress test* | **S1** (M), **S5** (M), **S9** (M) | `control_calidad_universo`, `control_calidad_precios`, `filtrar_spikes`, `fechas_fin_de_mes`, `rentabilidad_total_bono`, `backtest_equiponderado`, `revalorar_cartera`, `tabla_stress` | `control_calidad_universo.csv`, `control_calidad_precios.csv`, `backtest_equal_weight.csv`, `stress_test.csv` |
+| **P3 – Portfolio, hedging, deck** | Cartera óptima (MILP), coberturas de tipos/crédito y presentación | **S6** (L), **S7** (S), **S8** (S), Slides | `optimizar_mandato`, `dv01`, `num_futuros`, `cobertura_por_tramos`, `beta_credito`, `nocional_cds` | `cartera_optima.csv` |
 
 ---
 
@@ -71,16 +71,16 @@ Según el *Planning Brief* ([docs/planning_brief.pptx](docs/planning_brief.pptx)
 ## Resumen Detallado de Hitos Completados por Sección
 
 ### Sección 1: Datos y Control de Calidad (P2)
-- **Universo de bonos (`universo.csv`)**: 2.165 bonos corporativos en EUR emitidos por 605 entidades. El 85% son de cupón fijo y el 15% variables (todos híbridos subordinados *fixed-to-floating* de entidades financieras). Concentración sectorial del 44,8% en Financiero.
+- **Universo de bonos (`universo.csv`)**: 2.165 bonos corporativos en EUR emitidos por 605 entidades. El 85% son de cupón fijo y el 15% variables (330 híbridos *fixed-to-floating*, todos con call; 309 de ellos de emisores financieros). Concentración sectorial del 44,8% en Financiero.
 - **Limpieza de precios (`precios_historicos_universo.csv`)**:
   - Eliminación de 313 columnas de fin de semana y 10 festivos entre semana (quedan 774 días hábiles de negociación).
   - **Filtro de *spikes*** (`filtrar_spikes`): detección y limpieza de 46 saltos que revierten al día siguiente en 40 bonos (destacando el error anómalo en `ALVGR 1⅜ 2031`, `DE000A180B80`, que saltaba a 240,27 el 24/12/2024).
-  - *Forward-fill* de precios para huecos $\le 5$ días hábiles.
+  - *Forward-fill* (sin límite) de los huecos restantes: 284 días en 147 bonos, con un máximo de 31 días.
   - Mercado gris (85 bonos que cotizaban entre 2 y 9 días antes de emitirse): en el backtest se restringe su compra a partir de `Issue date` para evitar *look-ahead bias*.
 - **Análisis de anomalías y sesgos documentados**:
   - **Discordancia cupón vs nombre en LRFP 3½ 2029 (`FR001400I5S6`)**: cupón al 3,625% frente a descripción 3½ (posible *step-up* de +12,5 pb típico de bonos ligados a sostenibilidad, SLB).
   - **Grandes emisores sin dato de rating (`NaN`)**: `XS0866310088` (*AT&T*), `XS1075995768` (*McDonald's*) y `FI4000496286` (*Neste*), cotizando con spreads plenamente de Grado de Inversión.
-  - **Sesgo de opcionalidad en callables**: de los 1.582 bonos marcados como `Callable = 'Y'`, **1.128 bonos (el 71,3%) son par-calls técnicas** situadas a exactamente 3 meses de vencimiento. Solo ~316 bonos presentan opcionalidad real con años de anticipación.
+  - **Sesgo de opcionalidad en callables**: de los 1.582 bonos marcados como `Callable = 'Y'`, **1.115 bonos (el 70,5%) son par-calls técnicas** situadas a exactamente 3 meses de vencimiento. Solo ~316 bonos presentan opcionalidad real con años de anticipación.
   - **Nominales vivos no redondos**: 63 bonos (p. ej. *GE 6.025 2038* con 484.697.000 €) debido a recompras parciales (*tender offers*) del emisor.
   - **Composición del High Yield**: de los 8 bonos `BB+`, *Ericsson* y *Nokia* cotizan a niveles de IG; solo *Ford Motor Credit* refleja riesgo genuino de HY.
 - **Entregables generados**:
@@ -94,8 +94,8 @@ Según el *Planning Brief* ([docs/planning_brief.pptx](docs/planning_brief.pptx)
   - Corrección de las 11 emisiones con call vencida (`Next Call Date <= 01/10/2026`), valoradas a `Maturity` (o al próximo cupón en el perpetuo `FR0014005EJ6`).
   - Tratamiento exacto de *stubs* en par-calls fuera de calendario (pago de 100 más cupón devengado en base `ACT/365`).
 - **Anomalía de precio en STERV 0⅝ 2030 (`XS2265360359`)**:
-  - Cotiza a 100,35 (+9,62% sobre precio calculado). La serie histórica demuestra que el 14/08/2026 saltó +4,23 puntos (de 95,61 a 99,84) y permaneció congelado a 100 durante 17 sesiones consecutivas: evidencia directa de una oferta pública de recompra (*tender offer*) a la par o amortización anticipada.
-- **Validación con 6 Golden Fixtures**: superada con discrepancias menores a $10^{-10}$ en precio:
+  - Cotiza a 100,35 (+9,62% sobre precio calculado). La serie histórica demuestra que el 14/08/2026 saltó +4,23 puntos (de 95,61 a 99,84) y desde entonces permanece pegado a 100, con la racha más larga del universo sin cambios de precio (17 sesiones): señal típica de una oferta de recompra (*tender offer*) a la par o de una amortización anticipada anunciada.
+- **Validación con 6 Golden Fixtures**: superada con discrepancias del orden de $10^{-10}$ en precio (máximo $1{,}1 \cdot 10^{-10}$, en la ida y vuelta del *z-spread*):
   1. `XS0161488498`: anual estándar (no callable) $\to$ `OK`.
   2. `XS1821883102`: semestral $\to$ `OK`.
   3. `FR0014001I50`: cupón cero $\to$ `OK`.
@@ -128,7 +128,7 @@ Según el *Planning Brief* ([docs/planning_brief.pptx](docs/planning_brief.pptx)
   - **Duración Modificada ($\text{ModDur} = \text{Dur}/(1+y)$)** y **Convexidad**: validadas analíticamente y contrastadas contra diferencias finitas centradas (*bump & reprice* de $\pm 1\text{ pb}$).
   - **Aproximación de Taylor ante $\Delta y = -100\text{ pb}$**:
     $$\frac{\Delta P}{P} \approx -\text{ModDur}\cdot \Delta y + \frac{1}{2}\,\text{Convexidad}\cdot (\Delta y)^{2}$$
-    La apreciación mediana es del **`+2,39%`** y el término de convexidad reduce el error mediano de estimación en casi 30 veces (de `0,0399%` a solo `0,0006%`).
+    La apreciación mediana es del **`+2,39%`** y el término de convexidad reduce el error mediano de estimación a menos de una sesentava parte (de `0,0399%` a solo `0,0006%`).
 - **Entregable generado**: [results/sensibilidad.csv](results/sensibilidad.csv) (`ISIN;Yield;Dur;ModDur;Convexidad;VarPrecioDurConv`, 2.165 bonos, 0 `NaN`).
 
 ### Sección 5: Backtest de la Cartera Equiponderada (P2)
@@ -161,14 +161,14 @@ Según el *Planning Brief* ([docs/planning_brief.pptx](docs/planning_brief.pptx)
 
 ### Sección 7: Cobertura de Tipos de Interés (P3)
 - **Instrumento**: futuros sobre bono nocional alemán a 2 años *Schatz* (`DU1`, cotizando a `104,925`, nominal de `100.000 €`).
-- **Inmunización de duración**: dimensión de la posición corta para neutralizar el riesgo de tipos de la cartera óptima sobre un nocional de 100M €:
-  $$N_{\text{futuros}} = \frac{V_{\text{cartera}} \cdot \text{Dur}_{\text{cartera}}}{P_{\text{futuro}} \cdot \text{Nominal} \cdot \text{Dur}_{\text{futuro}}}$$
-  La posición corta en futuros DU1 neutraliza la sensibilidad monetaria ($\text{DV01}$), reduciendo la duración neta a cero frente a desplazamientos paralelos de la curva libre de riesgo.
+- **Inmunización de duración**: posición corta que iguala el DV01 de la cartera óptima (10 M€, duración modificada 2,85, DV01 ≈ 2.850 €/pb) con el DV01 de un contrato (20,15 €/pb):
+  $$N = \frac{\text{DV01}_{\text{cartera}}}{\text{DV01}_{\text{futuro}}} = \frac{2.850}{20{,}15} \approx 141{,}5 \;\Rightarrow\; \text{venta de 141 contratos DU1}$$
+  Tras la cobertura queda un DV01 de solo +9 €/pb. Como mejora, se analiza una cobertura por tramos (45 DU1 para los bonos cortos y 32 OE1 para los largos).
 
 ### Sección 8: Cobertura de Riesgo de Crédito (P3)
 - **Instrumento**: compra de protección mediante CDS sobre el índice **iTraxx Europe Main** a 5 años (125 entidades Investment Grade, cotizando a `65,7 pb` a fecha de análisis).
 - **Sensibilidad de crédito**: el índice presenta un valor del punto básico de $4.500\text{ €/pb}$ por cada $10\text{M€}$ de nocional ($\text{Spread Duration} \approx 4{,}5$).
-- **Dimensionamiento de la cobertura**: ajuste de la posición con la beta de crédito de la cartera ($\beta \approx 1{,}1$), garantizando la cobertura de los diferenciales crediticios sin penalizar excesivamente el carry de la cartera óptima.
+- **Dimensionamiento de la cobertura**: con el CS01 de la cartera (3.000 €/pb) y $\beta = 1$ se compran **6,7 M€ de protección** sobre el iTraxx Main, con un coste de unos 44 k€ al año (el 24% del *carry* de crédito). La beta empírica frente al Main es de $2{,}02$ (regresión semanal, $R^{2} = 0{,}58$); cubrirla entera exigiría 13,5 M€, por lo que se opta por una cobertura parcial deliberada.
 
 ### Sección 9: Stress Testing sobre Cartera de 100M € (P2)
 - **Metodología**: revaluación completa flujo a flujo sobre una inversión de **100.000.000,00 €** en la cartera óptima, sin recurrir a aproximaciones lineales de duración/convexidad.
@@ -189,8 +189,8 @@ Todos los ficheros de salida han sido verificados contra los requisitos del *Pla
 
 | Sección | Fichero | Filas | Columnas Verificadas | Separador / Codificación | Estado |
 | :---: | :--- | :---: | :--- | :---: | :---: |
-| **S1** | `control_calidad_universo.csv` | 21 | `Variable;Observaciones;Missing;Unicos;Min;Max` | `;` / UTF-8 | ✅ Verificado |
-| **S1** | `control_calidad_precios.csv` | 2.165 | `ISIN;Observaciones;Missing;Min;Max;FechaInicio;FechaFin` | `;` / UTF-8 | ✅ Verificado |
+| **S1** | `control_calidad_universo.csv` | 21 | `Caracteristica;NumObservaciones;NumMissing;NumValoresUnicos;Minimo;Maximo` | `;` / UTF-8 | ✅ Verificado |
+| **S1** | `control_calidad_precios.csv` | 2.165 | `ISIN;NumObservaciones;NumMissing;Minimo;Maximo;FechaInicio;FechaFin;HuecosEntreCotizaciones` | `;` / UTF-8 | ✅ Verificado |
 | **S2** | `valoracion.csv` | 2.165 | `ISIN;PrecioMercado;PrecioSucioCalculado;CuponCorrido;PrecioLimpioCalculado;DiferenciaMecadoCalculo;DiferenciaPct` | `;` / UTF-8 | ✅ Verificado |
 | **S3** | `spread.csv` | 2.165 | `ISIN;Spread;PrecioSpreadCero;PrecioSpreadCalculado` | `;` / UTF-8 | ✅ Verificado |
 | **S4** | `sensibilidad.csv` | 2.165 | `ISIN;Yield;Dur;ModDur;Convexidad;VarPrecioDurConv` | `;` / UTF-8 | ✅ Verificado |

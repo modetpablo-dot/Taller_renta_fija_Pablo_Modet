@@ -218,3 +218,6 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# Zip de entrega: se genera aparte, no se versiona
+*.zip
